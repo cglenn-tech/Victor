@@ -61,6 +61,21 @@ SCREENSHOT_LARGE_DIFF = 0.15
 # signal fires, so long sessions have periodic coverage.
 SCREENSHOT_MIN_INTERVAL = 60.0
 
+# ── Self-hosted model (the only model path) ────────────────────────────────────
+# The entire product is private: the ONLY allowed model is the self-hosted,
+# OpenAI-compatible endpoint configured here. No third-party model calls exist.
+SELF_HOSTED_MODEL_URL = os.environ.get("SELF_HOSTED_MODEL_URL", "")
+SELF_HOSTED_MODEL_NAME = os.environ.get("SELF_HOSTED_MODEL_NAME", "")
+SELF_HOSTED_API_KEY = os.environ.get("SELF_HOSTED_API_KEY", "")
+
+MODEL_TIMEOUT_SECONDS = 60          # per-request timeout
+MODEL_MAX_RETRIES = 3              # retries on network/5xx/429 (exponential backoff)
+
+# ── Observation batching (screenshots → one structured observation) ──────────
+OBSERVATION_BATCH_SIZE = int(os.environ.get("OBSERVATION_BATCH_SIZE", "5"))
+OBSERVATION_FLUSH_IDLE_SECONDS = int(os.environ.get("OBSERVATION_FLUSH_IDLE_SECONDS", "600"))
+MIN_OBSERVATION_BATCH = 2          # below this, idle flushes drop the partial batch
+
 # ── API ───────────────────────────────────────────────────────────────────────
 # Development: set BUILDHARVEY_BASE_URL=http://localhost:3000 in agent/.env
 # Production app bundle uses the hardcoded default.
