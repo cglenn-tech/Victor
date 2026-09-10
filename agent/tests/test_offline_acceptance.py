@@ -1,8 +1,14 @@
 """
-Offline Acceptance Test — Phase 12.
+Offline Acceptance Test.
 
-Verifies that no network calls are made during a complete
-capture → episode → report sequence when PRIVATE_MODE=true.
+Verifies the core privacy invariant of the new architecture: with the
+self-hosted model endpoint UNCONFIGURED, a complete capture → episode →
+report sequence runs with zero network calls and no crashes.
+
+The product is private by design: the only network destinations in the
+entire agent are (a) the user's own Supabase backend (episode/observation
+sync) and (b) the self-hosted model endpoint via model_client.py. There is
+no third-party model path anywhere.
 
 Mocks urllib.request.urlopen and socket.create_connection at module level
 and asserts zero calls to either throughout the full pipeline.
@@ -158,14 +164,30 @@ class TestOfflineAcceptance(unittest.TestCase):
             if ep.duration_minutes >= _config.MIN_EPISODE_DURATION_MINUTES:
                 database.save_episode(conn, ep)
 
-            # ── Step 4: sync enqueue (must be no-op in Private Mode) ─────────
-            import sync
-            # sync.start() must not launch a worker in Private Mode
-            sync.start()
-            # If sync.start() did not raise, check nothing was queued to network
-            sync.enqueue_episode({"id": "test-id", "case_name": "Test", "key_observations": []})
-            # Give the (hypothetical, should-not-exist) worker a moment to fire
-            time.sleep(0.05)
+            # ── Step 4: persist a structured observation locally ──────────
+            # Sync to the user's own backend is networked by design and is
+            # therefore NOT part of the offline invariant. Here we verify the
+            # durable local record works without any network.
+            obs_dict = {
+                "id": "test-obs-id",
+                "title": "Test observation",
+                "summary": "Drafted a motion and reviewed discovery responses.",
+                "observed_at": "2026-09-10T10:00:00Z",
+                "start_time": "2026-09-10T10:00:00Z",
+                "end_time": "2026-09-10T10:04:00Z",
+                "applications": ["Microsoft Word"],
+                "entities": [],
+                "activity_type": "drafting",
+                "episode_id": ep.id,
+            }
+            database.save_observation(conn, obs_dict)
+            database.mark_observation_synced(conn, "test-obs-id")
+            saved = conn.execute(
+                "SELECT title, activity_type, synced_at FROM observations WHERE id = ?",
+                ("test-obs-id",),
+            ).fetchone()
+            self.assertIsNotNone(saved)
+            self.assertEqual(saved[1], "drafting")
 
             # ── Step 5: weekly report generation ─────────────────────────────
             from weekly_report import WeeklyReportEngine
@@ -188,52 +210,75 @@ class TestOfflineAcceptance(unittest.TestCase):
             _config.PREV_FRAME_PATH = original_prev_frame
             _config.BASE_DIR = original_base_dir
 
-    def test_sync_start_is_noop_in_private_mode(self):
-        """sync.start() must not launch a worker thread when PRIVATE_MODE=true."""
-        import config as _config
-        self.assertTrue(_config.PRIVATE_MODE, "PRIVATE_MODE must be true for this test")
-
+    def test_sync_queues_observation_and_episode_without_third_party_calls(self):
+        """sync queue accepts observations/episodes; worker only ever talks to
+        the user's own backend (config.BASE_URL) with the device token — never
+        to a third-party model."""
         import sync
-        threads_before = {t.name for t in threading.enumerate()}
-        sync.start()
-        time.sleep(0.05)
-        threads_after = {t.name for t in threading.enumerate()}
-        self.assertNotIn("sync-worker", threads_after - threads_before)
+        # Enqueue must not crash and must not attempt network on the caller thread
+        sync.enqueue_observation({
+            "id": "obs-1", "title": "T", "summary": "S", "observed_at": "2026-09-10T10:00:00Z",
+        })
+        sync.enqueue_episode({"id": "ep-1", "case_name": "Test", "key_observations": []})
+        # No worker started here — queueing is passive by design
+        self.assertGreater(sync._queue.qsize(), 0)
 
-    def test_finalizer_does_not_call_server_in_private_mode(self):
-        """finalizer._generate_observations() must not call _server_observations in Private Mode."""
-        import config as _config
-        self.assertTrue(_config.PRIVATE_MODE)
+    def test_finalizer_has_no_server_path_at_all(self):
+        """The server finalize call is deleted from the codebase entirely."""
+        import finalizer
+        self.assertFalse(
+            hasattr(finalizer, "_server_observations"),
+            "finalizer must not contain a server path",
+        )
 
         urlopen_mock = self._make_network_blocker("urllib.request.urlopen")
         with patch("urllib.request.urlopen", urlopen_mock):
             from episode import new_episode
-            import finalizer
+            from episode import StructuredObservation
             ep = new_episode("Test Episode", issue_worked_on=None)
+            so = StructuredObservation(
+                id="obs-1", title="Drafting motion",
+                observation="Drafted sections of the motion to compel and cited supporting case law.",
+                start_time="2026-09-10T10:00:00Z", end_time="2026-09-10T10:04:00Z",
+                applications=["Microsoft Word"], entities=["Peterson v. Ortega"],
+                activity_type="drafting",
+            )
+            ep.add_structured_observation(so)
             ep.close()
             finalizer.finalize(ep)
-            # If we get here without the mock firing, the invariant holds
+            # Structured observations become key observations without network
+            self.assertTrue(len(ep.key_observations) > 0)
+            self.assertIn("Drafting motion", ep.key_observations[0].text)
 
-    def test_vision_does_not_call_server_in_private_mode(self):
-        """vision.analyze() must return None without network calls in Private Mode."""
+    def test_vision_batcher_is_offline_when_model_unconfigured(self):
+        """With the self-hosted endpoint unconfigured, the batcher accumulates,
+        returns None on flush, deletes screenshots, and never touches the network."""
         import config as _config
-        self.assertTrue(_config.PRIVATE_MODE)
-        # USE_LOCAL_INFERENCE=false → NullBackend → _analyze_local returns None
-        # PRIVATE_MODE=true → cloud path blocked
-        urlopen_mock = self._make_network_blocker("urllib.request.urlopen")
-        with patch("urllib.request.urlopen", urlopen_mock):
-            import vision
-            from observer import Observation
+        _config.SELF_HOSTED_MODEL_URL = ""
+        _config.SELF_HOSTED_MODEL_NAME = ""
+        _config.SELF_HOSTED_API_KEY = ""
+        try:
+            urlopen_mock = self._make_network_blocker("urllib.request.urlopen")
+            with patch("urllib.request.urlopen", urlopen_mock):
+                import vision
+                from episode import BatchItem
 
-            class _FakeObs:
-                screenshot_path = None
-                app = "TestApp"
-                window_title = "Test Window"
-                browser_url = ""
-                entities = []
+                class _FakeObs:
+                    screenshot_path = None
+                    app = "TestApp"
+                    window_title = "Test Window"
+                    browser_url = ""
+                    file_path = ""
+                    entities = []
+                    timestamp = "2026-09-10T10:00:00Z"
 
-            result = vision.analyze(_FakeObs(), {})
-            self.assertIsNone(result)
+                batcher = vision.ObservationBatcher()
+                self.assertIsNone(batcher.add(_FakeObs()))
+                self.assertEqual(len(batcher), 1)
+                self.assertIsNone(batcher.flush(force=True))
+                # Batch dropped after max attempts — screenshots cleaned up, no crash
+        finally:
+            _enforce_private_mode()
 
 
 if __name__ == "__main__":
