@@ -90,17 +90,18 @@ class ObservationBatcher:
         if not force and len(self._items) < config.MIN_OBSERVATION_BATCH:
             return None
 
+        count = len(self._items)
         result = _analyze_batch(self._items)
         self._attempts += 1
 
         if result is not None:
+            log.info("vision.observation_created", title=result.title, batch_size=count)
             self._discard_items()
             self._attempts = 0
-            log.info("vision.observation_created", title=result.title, batch_size=len(self._items) + 1)
             return result
 
         if self._attempts >= BATCH_MAX_ATTEMPTS:
-            log.warning("vision.batch_dropped", items=len(self._items), attempts=self._attempts)
+            log.warning("vision.batch_dropped", items=count, attempts=self._attempts)
             self._discard_items()
             self._attempts = 0
         else:
