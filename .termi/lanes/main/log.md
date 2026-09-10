@@ -282,3 +282,40 @@ Reuse the existing weekly report web pipeline; do not rebuild it.
 Be careful with branding changes that affect installer names, DMG, or the buildharvey:// URL scheme.
 
 Confirm you understand this direction, then proceed with the implementation plan.now
+
+### 2026-09-10 23:02 — agent
+Direction confirmed: single self-hosted model client (agent calls it directly, no screenshots through web routes), all Anthropic code deleted, structured observations from 5-screenshot batches as the primary unit with episodes grouped around them, `018` table extended, weekly web pipeline reused with a model swap, branding changed only where user-visible (installer/DMG/URL scheme untouched). Setting up the plan and starting.That grep pattern didn't match (alternation quirk) — re-running with a substring that catches all casings.All references mapped. Deleting the three Anthropic routes and checking whether node_modules is present for test runs.Checking what's left in `app/api/agent` and the state of node_modules.Routes deleted (only archived files referenced them — fine). Removing the SDK dependency and installing packages in the background so I can run tests later.npm isn't on PATH — checking what node tooling exists on this machine.Found it — homebrew node/npm, just not on the shell's PATH. Installing with the full path.While npm installs, reading the rest of the report route to swap its Claude grouping call precisely.Report pipeline fully understood — the swap point is one Claude grouping call with a hardcoded model name. Writing the shared self-hosted model client first.Swapping the report route's Claude grouping callMalformed call — redoing the report route edit properly.Quick cleanup — the import includes an unused symbol; trimming it, and checking npm install progress.npm failed — the Mac's disk is full (ENOSPC). Checking how bad it is and whether any tooling survived the partial install.Disk is at 100% (116MB free) — that's a machine-level problem chas will need to fix, but I'll reclaim what my failed install consumed (npm cache) and see if the partial node_modules can still run tests.6.5GB reclaimed — the failed install's cache was hogging the disk. Restarting the install in the background and continuing implementation meanwhile.Now the migration extending 
+
+### 2026-09-10 23:03 — cglenn
+Delete dead and obsolete code
+Remove all Anthropic-related routes, imports, and clients (as already decided).
+Delete unused/dead routes (especially app/api/capture/analyze/route.ts and any other zero-caller files).
+Remove leftover BuildHarvey-only logic that is no longer reachable.
+Delete any experimental or abandoned files that are not part of the current Victor flow.
+
+Simplify
+Remove dual paths that no longer make sense now that everything is private + self-hosted only.
+Collapse any remaining “dev vs private” branching that is now meaningless.
+Prefer deleting complexity over adding feature flags.
+
+Bulletproof the core loops
+Desktop agent must survive model failures, bad screenshots, invalid JSON, and temporary network issues without crashing.
+Add sensible retries/backoff only where it actually helps.
+Make sure incomplete screenshot batches are handled cleanly (don’t lose data, don’t double-process).
+Ensure observation creation and episode updates are transactional / safe against partial failure.
+
+Do not over-clean
+Do not delete working systems just because they look old.
+Do not rename internal identifiers aggressively.
+Do not rewrite the weekly report pipeline or episode system from scratch.
+When in doubt about deleting something non-trivial, leave it and note it as a TODO.
+
+Final cleanup report
+At the end, include a short section listing:
+Files/routes you deleted
+Dead code paths you removed
+Hardening changes you made
+Any remaining risky or unclear areas
+
+
+The goal is a tighter, more reliable Victor — not a pure rewrite.

@@ -7,9 +7,10 @@ Run:  python main.py
 Loop:
   1. Check if a work session is active (user clicked Start on buildharvey.com).
   2. Each cycle: capture screen → extract context → build Observation.
-  3. If screenshot available: POST to /api/agent/vision for Claude analysis
-     (or invoke LocalInferenceBackend when USE_LOCAL_INFERENCE=true).
-     Engine passively groups into episodes using 2-signal hysteresis.
+  3. Screenshots accumulate into batches (~5). A full batch is sent as ONE
+     request to the self-hosted vision model (model_client), which returns one
+     structured observation. Episodes are grouped around observations
+     (2-signal hysteresis).
   4. If no screenshot or server returns None: update metadata context only.
   5. On episode close: finalize → persist to SQLite → enqueue server sync.
   6. On session end: broadcast daily_review so the web dashboard shows the modal.
@@ -68,18 +69,6 @@ def main(
     except Exception:
         pass
 
-    # Phase 3+: first-run model download when local inference is required
-    if config.USE_LOCAL_INFERENCE:
-        from local_inference import ModelManager
-        mm = ModelManager()
-        if mm.needs_download():
-            print("[agent] local AI models required — downloading in background...")
-            mm.download_all_in_background(
-                progress_cb=lambda name, dl, total: print(
-                    f"[agent] model {name}: {dl // (1024*1024)}MB"
-                    + (f"/{total // (1024*1024)}MB" if total else "")
-                )
-            )
     realtime_client.start()
 
     conn = database.connect()
@@ -114,6 +103,16 @@ def main(
     engine = EpisodeEngine()
     batcher = vision.ObservationBatcher()
     sync.start()
+
+    # Crash recovery: requeue anything persisted locally but never synced.
+    # Server upserts are idempotent by id, so re-sends are safe.
+    for ep in database.get_unsynced_episodes(conn):
+        sync.enqueue_episode(ep)
+    for ob in database.get_unsynced_observations(conn):
+        sync.enqueue_observation(ob)
+    if not model_client.is_configured():
+        print("[agent] WARNING: self-hosted model not configured — "
+              "set SELF_HOSTED_MODEL_URL / SELF_HOSTED_MODEL_NAME / SELF_HOSTED_API_KEY")
 
     _ws_state = 'idle'                  # tracks last state broadcast to realtime_client
     _open_gap_id: Optional[str] = None  # current open ObservationGap (if any)
@@ -245,7 +244,12 @@ def _handle_observation(conn, engine: EpisodeEngine, so) -> None:
     result = engine.ingest_observation(so)
     episode_id = engine.active.id if engine.active else None
     obs_dict = so.to_dict(episode_id=episode_id)
-    database.save_observation(conn, obs_dict)
+    try:
+        database.save_observation(conn, obs_dict)
+    except Exception:
+        # Local persistence failed — still enqueue so the server (the durable
+        # Observation Log) receives it. Log loudly, never crash the loop.
+        traceback.print_exc()
     sync.enqueue_observation(obs_dict)
     if result and result.closed_episode:
         _close_and_save(conn, result.closed_episode)
