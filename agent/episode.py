@@ -54,6 +54,53 @@ class ScreenshotEvidence:
     suggested_episode_name: str = ""
 
 
+# ── Batch item (pending screenshot awaiting model analysis) ───────────────────
+
+@dataclass
+class BatchItem:
+    """One screenshot accumulated for the next model batch (never persisted alone)."""
+    screenshot_path: str
+    timestamp: str                  # ISO 8601 UTC
+    app: str
+    window_title: str
+    browser_url: str
+    file_path: str
+    entities: list[str]
+
+
+# ── Structured observation (the primary semantic unit) ───────────────────────
+
+@dataclass
+class StructuredObservation:
+    """
+    One model-generated observation describing a ~5-screenshot sequence.
+    This is the durable record — screenshots are deleted after the batch is
+    processed. Episodes are grouped around these.
+    """
+    id: str
+    title: str
+    observation: str
+    start_time: str                 # ISO 8601 UTC
+    end_time: str
+    applications: list[str]
+    entities: list[str]
+    activity_type: str
+
+    def to_dict(self, episode_id: Optional[str] = None) -> dict:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "summary": self.observation,
+            "observed_at": self.start_time,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "applications": self.applications,
+            "entities": self.entities,
+            "activity_type": self.activity_type,
+            "episode_id": episode_id,
+        }
+
+
 # ── Raw observation (in-memory buffer, never persisted) ───────────────────────
 
 @dataclass
@@ -102,6 +149,9 @@ class Episode:
 
     # Primary semantic evidence — what the finalizer uses
     _evidence: list[ScreenshotEvidence] = field(default_factory=list)
+
+    # Structured observations (batched model output) — primary semantic unit
+    _structured_observations: list[StructuredObservation] = field(default_factory=list)
 
     # Metadata context buffer — fallback only, no semantic weight
     _raw_observations: list[RawObservation] = field(default_factory=list)
@@ -176,6 +226,12 @@ class Episode:
             self._total_paused_seconds += time.time() - self._pause_started_at
             self._pause_started_at = None
             self._is_paused = False
+
+    def add_structured_observation(self, so: StructuredObservation) -> None:
+        """Attach a completed model observation to this episode."""
+        self._structured_observations.append(so)
+        self.last_user_activity_at = time.time()
+        self.last_meaningful_evidence_at = time.time()
 
     def add_raw_observation(self, obs) -> None:
         """
