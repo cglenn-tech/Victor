@@ -26,9 +26,6 @@ _queue: queue.Queue = queue.Queue()
 
 
 def start() -> None:
-    if config.PRIVATE_MODE:
-        log.info("sync.disabled", reason="private_mode")
-        return
     t = threading.Thread(target=_worker, name="sync-worker", daemon=True)
     t.start()
     log.info("sync.started")
@@ -37,6 +34,11 @@ def start() -> None:
 def enqueue_episode(episode_dict: dict) -> None:
     """Queue a finalized episode for server sync."""
     _queue.put(episode_dict)
+
+
+def enqueue_observation(obs_dict: dict) -> None:
+    """Queue a completed structured observation for server sync."""
+    _queue.put({"_type": "observation", "observation": obs_dict})
 
 
 def enqueue_cleanup(invalid_ids: list[str]) -> None:
@@ -55,6 +57,8 @@ def _worker() -> None:
         try:
             if isinstance(task, dict) and task.get("_type") == "cleanup":
                 _cleanup(token, task["ids"])
+            elif isinstance(task, dict) and task.get("_type") == "observation":
+                _sync_observation(token, task["observation"], conn)
             else:
                 _upsert(token, task, conn)
         except Exception:
@@ -90,9 +94,24 @@ def _get(path: str, token: str) -> dict:
         return json.loads(resp.read())
 
 
-def _upsert(token: str | None, episode_dict: dict, conn: sqlite3.Connection) -> None:
-    if config.PRIVATE_MODE:
+def _sync_observation(token: str | None, obs: dict, conn: sqlite3.Connection) -> None:
+    """Push one observation to /api/observations/sync (device token auth)."""
+    if not token:
         return
+    obs_id = obs.get("id", "")
+    for attempt in range(5):
+        try:
+            _post("/api/observations/sync", {"observations": [obs]}, token)
+            database.mark_observation_synced(conn, obs_id)
+            log.info("sync.observation_synced", obs_id=obs_id[:8])
+            return
+        except Exception as exc:
+            log.warning("sync.observation_attempt_failed", attempt=attempt + 1, error=str(exc))
+            _time.sleep(2 ** attempt)
+    log.error("sync.observation_gave_up", obs_id=obs_id[:8])
+
+
+def _upsert(token: str | None, episode_dict: dict, conn: sqlite3.Connection) -> None:
     if not token:
         return
     episode_id = episode_dict["id"]
@@ -118,8 +137,6 @@ def _upsert(token: str | None, episode_dict: dict, conn: sqlite3.Connection) -> 
 
 def _upload_screenshots(token: str, episode_id: str, paths: list[str]) -> None:
     """Upload each evidence screenshot using signed upload URLs."""
-    if config.PRIVATE_MODE:
-        return
     for path in paths:
         p = Path(path)
         if not p.exists():
@@ -168,8 +185,6 @@ def _upload_screenshots(token: str, episode_id: str, paths: list[str]) -> None:
 
 
 def _cleanup(token: str | None, invalid_ids: list[str]) -> None:
-    if config.PRIVATE_MODE:
-        return
     if not token or not invalid_ids:
         return
     try:
