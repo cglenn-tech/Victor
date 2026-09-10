@@ -892,6 +892,48 @@ def mark_observation_synced(conn: sqlite3.Connection, obs_id: str) -> None:
     conn.commit()
 
 
+def get_unsynced_observations(conn: sqlite3.Connection) -> list[dict]:
+    """Rows persisted locally but never confirmed synced (crash recovery)."""
+    rows = conn.execute(
+        """
+        SELECT id, episode_id, title, summary, observed_at, start_time, end_time,
+               applications, entities, activity_type, created_at
+        FROM observations WHERE synced_at IS NULL
+        """
+    ).fetchall()
+    return [
+        {
+            "id": r[0], "episode_id": r[1], "title": r[2], "summary": r[3],
+            "observed_at": r[4], "start_time": r[5], "end_time": r[6],
+            "applications": json.loads(r[7] or "[]"),
+            "entities": json.loads(r[8] or "[]"),
+            "activity_type": r[9], "created_at": r[10],
+        }
+        for r in rows
+    ]
+
+
+def get_unsynced_episodes(conn: sqlite3.Connection) -> list[dict]:
+    """Finalized episodes persisted locally but never confirmed synced."""
+    rows = conn.execute(
+        """
+        SELECT id, case_name, issue_worked_on, work_type, started_at, ended_at,
+               duration_minutes, active_seconds, key_observations, created_at
+        FROM episodes WHERE synced_at IS NULL
+        """
+    ).fetchall()
+    return [
+        {
+            "id": r[0], "case_name": r[1], "issue_worked_on": r[2],
+            "work_type": r[3], "started_at": r[4], "ended_at": r[5],
+            "duration_minutes": r[6], "active_seconds": r[7],
+            "key_observations": json.loads(r[8] or "[]"),
+            "created_at": r[9], "evidence_paths": [],
+        }
+        for r in rows
+    ]
+
+
 def _now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
