@@ -31,9 +31,9 @@ Startup:
   - Enqueue server cleanup for those IDs.
   - Increment session epoch (detects crash recovery).
 
-Degraded mode (no device token):
-  - Vision analysis returns None; no Episodes opened.
-  - Metadata tracked in memory only.
+Degraded mode (model endpoint unreachable or unconfigured):
+  - Model analysis returns None; no Observations are created; no Episodes opened.
+  - Metadata tracked in memory only; batches retried then dropped safely.
   - System keeps running; no garbage Episodes created.
 """
 import threading
