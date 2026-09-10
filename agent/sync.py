@@ -118,55 +118,6 @@ def _upsert(token: str | None, episode_dict: dict, conn: sqlite3.Connection) -> 
         log.error("sync.gave_up", episode_id=episode_id[:8])
 
 
-def _upload_screenshots(token: str, episode_id: str, paths: list[str]) -> None:
-    """Upload each evidence screenshot using signed upload URLs."""
-    for path in paths:
-        p = Path(path)
-        if not p.exists():
-            log.warning("sync.screenshot_missing", path=path)
-            continue
-
-        filename = p.name
-        for attempt in range(5):
-            try:
-                # 1. Get signed upload URL
-                url_data = _get(
-                    f'/api/screenshots/upload-url?episode_id={episode_id}&filename={filename}',
-                    token,
-                )
-                upload_url = url_data['upload_url']
-                storage_path = url_data['path']
-
-                # 2. PUT image to signed URL (no auth header)
-                img_data = p.read_bytes()
-                put_req = urllib.request.Request(
-                    upload_url,
-                    data=img_data,
-                    headers={'Content-Type': 'image/jpeg'},
-                    method='PUT',
-                )
-                with urllib.request.urlopen(put_req, timeout=30):
-                    pass
-
-                # 3. Confirm upload
-                _post('/api/screenshots/confirm', {
-                    'episode_id': episode_id,
-                    'path': storage_path,
-                }, token)
-
-                log.info("sync.screenshot_uploaded", filename=filename, episode_id=episode_id[:8])
-                break
-            except urllib.error.HTTPError as exc:
-                if exc.code == 409:
-                    # Already uploaded — idempotent
-                    break
-                log.warning("sync.screenshot_upload_failed", attempt=attempt + 1, error=str(exc))
-                _time.sleep(2 ** attempt)
-            except Exception as exc:
-                log.warning("sync.screenshot_upload_failed", attempt=attempt + 1, error=str(exc))
-                _time.sleep(2 ** attempt)
-
-
 def _cleanup(token: str | None, invalid_ids: list[str]) -> None:
     if not token or not invalid_ids:
         return

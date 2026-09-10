@@ -402,29 +402,3 @@ class EpisodeEngine:
             reason=reason or "",
         )
         return ep
-
-
-def _has_strong_entity_shift(evidence: ScreenshotEvidence, current: Optional[Episode]) -> bool:
-    """
-    Returns True if evidence contains a strong-confidence entity that is
-    clearly different from all entities seen in the current episode.
-    Only fires on evidence_strength='strong' — moderate/weak don't split episodes.
-    """
-    if not current or not current._evidence:
-        return False
-
-    strong_new = {
-        e["name"].lower()
-        for e in evidence.entities
-        if e.get("evidence_strength") == "strong"
-    }
-    if not strong_new:
-        return False
-
-    known = {
-        e["name"].lower()
-        for ev in current._evidence
-        for e in ev.entities
-    }
-    # Shift only if ALL strong new entities are absent from known entities
-    return bool(strong_new) and strong_new.isdisjoint(known)

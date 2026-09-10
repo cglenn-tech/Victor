@@ -38,6 +38,10 @@ log = get_logger("vision")
 
 BATCH_MAX_ATTEMPTS = 3
 
+
+class _PermanentBatchError(Exception):
+    """Batch can never succeed (corrupt screenshot, oversized image) — drop immediately."""
+
 REQUIRED_FIELDS = ("title", "observation", "startTime", "endTime", "applications", "entities", "activityType")
 
 ACTIVITY_TYPES = (
@@ -91,7 +95,15 @@ class ObservationBatcher:
             return None
 
         count = len(self._items)
-        result = _analyze_batch(self._items)
+        try:
+            result = _analyze_batch(self._items)
+        except _PermanentBatchError as e:
+            # Corrupt/oversized screenshots never heal — drop now, keep the
+            # loop alive, and don't burn retries on a deterministic failure.
+            log.warning("vision.batch_dropped_permanently", items=count, error=str(e))
+            self._discard_items()
+            self._attempts = 0
+            return None
         self._attempts += 1
 
         if result is not None:
@@ -137,16 +149,15 @@ def _analyze_batch(items: list[BatchItem], strict_retry: bool = False) -> Option
     try:
         images = [_prepare_screenshot(i.screenshot_path) for i in items]
     except Exception as e:
-        log.error("vision.prepare_failed", error=str(e))
-        return None
+        # A screenshot that cannot be read/resized will fail every retry
+        raise _PermanentBatchError(f"unreadable screenshot: {type(e).__name__}") from e
 
     prompt = _build_prompt(items, strict_retry)
     content: list[dict] = [{"type": "text", "text": prompt}]
     for jpeg in images:
         b64 = base64.standard_b64encode(jpeg).decode("utf-8")
         if len(b64) > config.VISION_MAX_ENCODED_BYTES:
-            log.warning("vision.image_too_large", size=len(b64))
-            return None
+            raise _PermanentBatchError(f"image too large: {len(b64)} bytes")
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
 
     raw = model_client.chat_completion(

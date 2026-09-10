@@ -11,8 +11,7 @@ Screenshot lifecycle (Phase 2 target: zero persistent raw screenshots):
 
 Key observations path (in priority order):
   1. Structured observations attached to the episode (model batch output)
-  2. LocalInferenceBackend (USE_LOCAL_INFERENCE=true) — fully on-device
-  3. Template fallback — deterministic, no network
+  2. Template fallback — deterministic, no network
 
 Core philosophy: produce observations that read like an executive assistant
 summarized the work — not browser history. Synthesize. Connect. Reconstruct.
@@ -25,11 +24,6 @@ from bh_logging import get_logger
 from episode import Episode, KeyObservation, RawObservation
 
 log = get_logger("finalizer")
-
-# Phase 2: evidence directory is deprecated — no persistent screenshots.
-# The constant is kept for migration cleanup; no new files are written here.
-_EVIDENCE_BASE = config.BASE_DIR / "evidence"
-
 
 def finalize(episode: Episode) -> None:
     """
@@ -61,15 +55,9 @@ def _generate_observations(
     if episode._structured_observations:
         return _structured_key_observations(episode)
 
-    if config.USE_LOCAL_INFERENCE:
-        result = _local_observations(episode)
-        if result is not None:
-            return result
-
     obs = _template_observations(episode._raw_observations)
-    # inference_failed=True if local was expected but unavailable
-    inference_failed = config.USE_LOCAL_INFERENCE
-    return obs, None, None, inference_failed
+    # The model contributed nothing to this episode — flag it as degraded
+    return obs, None, None, True
 
 
 # ── Structured observations path (primary) ──────────────────────────────────
@@ -104,80 +92,7 @@ def _structured_key_observations(
 
 # ── Local inference path (Phase 3+) ───────────────────────────────────────────
 
-def _local_observations(
-    episode: Episode,
-) -> tuple[list[KeyObservation], str | None, float | None, bool] | None:
-    """
-    Generate observations via LocalInferenceBackend (fully on-device).
-    Returns None if local inference is unavailable (caller falls through to server).
-    """
-    try:
-        from local_inference import get_backend
-        backend = get_backend()
-        if not backend.is_available():
-            return None
-
-        # Build observation list from raw observations (no OCR text — metadata only)
-        observations = [
-            {
-                "timestamp": r.timestamp,
-                "app": r.app,
-                "window_title": r.window_title,
-                "entities": r.entities,
-            }
-            for r in episode._raw_observations
-        ]
-
-        result = backend.summarize_episode(
-            episode_name=episode.case_name,
-            started_at=episode.started_at,
-            ended_at=episode.ended_at or "",
-            duration_minutes=episode.duration_minutes,
-            observations=observations,
-        )
-
-        if result.inference_failed:
-            log.error("finalizer.local_inference_failed", episode_id=episode.id)
-            # Do not fall through silently — log and return failed marker
-            return [], result.activity_classification, result.classification_confidence, True
-
-        key_obs = [
-            KeyObservation(timestamp=o["timestamp"], text=o["text"])
-            for o in result.key_observations
-            if o.get("timestamp") and o.get("text")
-        ][:config.MAX_KEY_OBSERVATIONS]
-
-        return (
-            key_obs,
-            result.activity_classification,
-            result.classification_confidence,
-            False,
-        )
-    except Exception as e:
-        log.error("finalizer.local_inference_error", error=str(e))
-        return None
-
-
 # ── Activity log ──────────────────────────────────────────────────────────────
-
-def _activity_log(raw: list[RawObservation]) -> str:
-    """Format raw observations as a compact activity log for Claude context."""
-    lines = []
-    for r in raw:
-        parts = [r.timestamp]
-        if r.app:
-            parts.append(r.app)
-        if r.window_title:
-            parts.append(f'"{r.window_title}"')
-        if r.browser_url:
-            parts.append(r.browser_url)
-        if r.file_path:
-            parts.append(r.file_path)
-        if r.entities:
-            parts.append("entities: " + ", ".join(r.entities[:4]))
-        lines.append(" | ".join(parts))
-    return "\n".join(lines)
-
 
 # ── Template fallback ──────────────────────────────────────────────────────────
 
@@ -197,18 +112,6 @@ def _template_observations(raw: list[RawObservation]) -> list[KeyObservation]:
 
 
 # ── Deduplication ─────────────────────────────────────────────────────────────
-
-def _deduplicate(raw: list[RawObservation]) -> list[RawObservation]:
-    """Remove consecutive observations with identical app + window + file context."""
-    if not raw:
-        return []
-    result = [raw[0]]
-    for r in raw[1:]:
-        prev = result[-1]
-        if r.app != prev.app or r.window_title != prev.window_title or r.file_path != prev.file_path:
-            result.append(r)
-    return result
-
 
 # ── Screenshot lifecycle (Phase 2) ────────────────────────────────────────────
 
