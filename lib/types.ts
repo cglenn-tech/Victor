@@ -1,3 +1,13 @@
+// A single captured moment from a work session (screenshot + summary).
+export type Observation = {
+  id: string;
+  user_id: string;
+  observed_at: string;
+  created_at: string;
+  screenshot_path?: string | null;
+  summary: string;
+};
+
 export type KeyObservation = {
   timestamp: string; // ISO string or HH:MM
   text: string;      // "Drafted motion to compel, Peterson v. Ortega"
