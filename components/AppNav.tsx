@@ -21,6 +21,12 @@ export default function AppNav() {
         </Link>
         <div className="flex items-center gap-6">
           <Link
+            href="/observations"
+            className="text-sm text-neutral-500 hover:text-neutral-900 transition-colors"
+          >
+            Observations
+          </Link>
+          <Link
             href="/files"
             className="text-sm text-neutral-500 hover:text-neutral-900 transition-colors"
           >
