@@ -6,6 +6,15 @@ export type Observation = {
   created_at: string;
   screenshot_path?: string | null;
   summary: string;
+  title?: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  applications?: string[];
+  entities?: string[];
+  activity_type?: string | null;
+  is_approved?: boolean;
+  edited_at?: string | null;
+  episode_id?: string | null;
 };
 
 export type KeyObservation = {
