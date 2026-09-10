@@ -857,8 +857,7 @@ def _migrate_observations(conn: sqlite3.Connection) -> None:
 
 
 def save_observation(conn: sqlite3.Connection, obs: dict) -> None:
-    """Persist one structured observation (idempotent by id)."""
-    import json as _json
+    """Persist one structured observation (idempotent by id).\"\"\"
     conn.execute(
         """
         INSERT OR REPLACE INTO observations (
