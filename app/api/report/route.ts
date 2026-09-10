@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
+import { chatCompletion, extractJSON } from "@/lib/model-client";
 import { getServerClient } from "@/lib/supabase-server";
-import type { Episode, KeyObservation } from "@/lib/types";
+import type { Episode, KeyObservation, Observation } from "@/lib/types";
 
 // ── Duration formatter ─────────────────────────────────────────────────────────
 
@@ -229,19 +229,26 @@ function renderReport(
   return lines.join("\n");
 }
 
-// ── Episode summary for Claude grouping prompt ────────────────────────────────
+// ── Episode summary for model grouping prompt ─────────────────────────────────
 
-function episodeSummary(ep: Episode): string {
-  const obs = (ep.key_observations as KeyObservation[])
-    .map((o) => `  - ${o.text}`)
-    .join("\n");
+function episodeSummary(ep: Episode, obsByEpisode: Map<string, Observation[]>): string {
+  // Approved observations supersede the original key_observations text.
+  const obs = obsByEpisode.get(ep.id) ?? [];
+  const text =
+    obs.length > 0
+      ? obs
+          .map((o) => `  - ${o.title ? o.title + ": " : ""}${o.summary}`)
+          .join("\n")
+      : (ep.key_observations as KeyObservation[])
+          .map((o) => `  - ${o.text}`)
+          .join("\n");
   return [
     `id: ${ep.id}`,
     `case_name: ${ep.case_name}`,
     `work_type: ${ep.work_type ?? "project"}`,
     `duration_minutes: ${ep.duration_minutes}`,
     `started_at: ${ep.started_at}`,
-    `observations:\n${obs || "  (none)"}`,
+    `observations:\n${text || "  (none)"}`,
   ].join("\n");
 }
 
@@ -337,9 +344,29 @@ export async function POST(request: Request) {
     return Response.json({ error: "no_episodes" }, { status: 422 });
   }
 
-  // ── Phase 1: Claude groups episodes (JSON only, no math) ──────────────────
+  // ── Approved observations supersede key_observations in report input ────────
 
-  const episodesSummary = reportable.map(episodeSummary).join("\n\n---\n\n");
+  const { data: obsData } = await supabase
+    .from("observations")
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("is_approved", true)
+    .gte("observed_at", periodStart + "T00:00:00Z")
+    .lte("observed_at", periodEnd + "T23:59:59Z")
+    .order("observed_at", { ascending: true });
+
+  const obsByEpisode = new Map<string, Observation[]>();
+  for (const o of ((obsData as Observation[]) ?? []).filter((o) => o.episode_id)) {
+    const list = obsByEpisode.get(o.episode_id!) ?? []
+    list.push(o)
+    obsByEpisode.set(o.episode_id!, list)
+  }
+
+  // ── Phase 1: model groups episodes (JSON only, no math) ──────────────────
+
+  const episodesSummary = reportable
+    .map((ep) => episodeSummary(ep, obsByEpisode))
+    .join("\n\n---\n\n");
 
   const groupingPrompt = `You are grouping work episodes for a lawyer's timesheet.
 
@@ -368,20 +395,15 @@ ${episodesSummary}`;
 
   let claudeGroups: ClaudeGroup[];
   try {
-    const client = new Anthropic();
-    const message = await client.messages.create({
-      model: "claude-opus-4-6",
-      max_tokens: 2048,
-      messages: [{ role: "user", content: groupingPrompt }],
-    });
-    const raw =
-      message.content[0].type === "text" ? message.content[0].text : "[]";
-    // Strip any accidental markdown fences
+    const raw = await chatCompletion(
+      [{ role: "user", content: groupingPrompt }],
+      { maxTokens: 2048, timeoutMs: 60_000, retries: 2 },
+    );
     const cleaned = raw
       .replace(/^```(?:json)?\s*/i, "")
       .replace(/\s*```\s*$/i, "")
       .trim();
-    claudeGroups = JSON.parse(cleaned);
+    claudeGroups = extractJSON(cleaned) as ClaudeGroup[];
     if (!Array.isArray(claudeGroups)) throw new Error("Expected JSON array");
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -458,4 +480,6 @@ ${episodesSummary}`;
   }
 
   return Response.json({ report, id: savedId });
+}
+id: savedId });
 }
