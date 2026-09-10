@@ -1,8 +1,8 @@
 """
 Async background sync worker.
 The main loop never waits for the server — SQLite is written first.
-Syncs via /api/episodes/sync (device token auth) — no database credentials.
-Screenshots are uploaded after each episode sync using signed upload URLs.
+Syncs episodes and observations via device-token API routes — no database
+credentials, and no screenshots ever leave the device.
 """
 import json
 import os
@@ -83,17 +83,6 @@ def _post(path: str, body: dict, token: str) -> dict:
         return json.loads(resp.read())
 
 
-def _get(path: str, token: str) -> dict:
-    url = f"{config.BASE_URL}{path}"
-    req = urllib.request.Request(
-        url,
-        headers={'Authorization': f'Bearer {token}'},
-        method='GET',
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read())
-
-
 def _sync_observation(token: str | None, obs: dict, conn: sqlite3.Connection) -> None:
     """Push one observation to /api/observations/sync (device token auth)."""
     if not token:
@@ -128,11 +117,6 @@ def _upsert(token: str | None, episode_dict: dict, conn: sqlite3.Connection) -> 
             _time.sleep(2 ** attempt)
     else:
         log.error("sync.gave_up", episode_id=episode_id[:8])
-        return  # Don't upload screenshots if episode sync failed
-
-    # Upload evidence screenshots after successful episode sync
-    if evidence_paths and token:
-        _upload_screenshots(token, episode_id, evidence_paths)
 
 
 def _upload_screenshots(token: str, episode_id: str, paths: list[str]) -> None:
