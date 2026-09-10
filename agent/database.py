@@ -718,6 +718,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     """Create or migrate all tables to the current schema."""
     _migrate_episodes(conn)
     _migrate_phase1_tables(conn)
+    _migrate_observations(conn)
 
 
 def _migrate_episodes(conn: sqlite3.Connection) -> None:
@@ -787,7 +788,6 @@ def _migrate_episodes(conn: sqlite3.Connection) -> None:
 
 def _migrate_phase1_tables(conn: sqlite3.Connection) -> None:
     """Create Phase 1 tables: capture_leases, observation_gaps, session_state."""
-
     # Per-window consent leases
     conn.execute("""
         CREATE TABLE IF NOT EXISTS capture_leases (
@@ -829,6 +829,72 @@ def _migrate_phase1_tables(conn: sqlite3.Connection) -> None:
     """)
 
     conn.commit()
+
+
+def _migrate_observations(conn: sqlite3.Connection) -> None:
+    """Structured observations — the durable record produced by the model batches."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS observations (
+            id            TEXT PRIMARY KEY,
+            episode_id    TEXT REFERENCES episodes(id),
+            title         TEXT NOT NULL DEFAULT '',
+            summary       TEXT NOT NULL DEFAULT '',
+            observed_at   TEXT NOT NULL,
+            start_time    TEXT,
+            end_time      TEXT,
+            applications  TEXT NOT NULL DEFAULT '[]',
+            entities      TEXT NOT NULL DEFAULT '[]',
+            activity_type TEXT,
+            is_approved   INTEGER NOT NULL DEFAULT 0,
+            created_at    TEXT NOT NULL,
+            synced_at     TEXT
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS observations_episode_idx ON observations (episode_id)"
+    )
+    conn.commit()
+
+
+def save_observation(conn: sqlite3.Connection, obs: dict) -> None:
+    """Persist one structured observation (idempotent by id)."""
+    import json as _json
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO observations (
+            id, episode_id, title, summary, observed_at, start_time, end_time,
+            applications, entities, activity_type, is_approved, created_at, synced_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+        """,
+        (
+            obs["id"],
+            obs.get("episode_id"),
+            obs.get("title", ""),
+            obs.get("summary", ""),
+            obs.get("observed_at", ""),
+            obs.get("start_time"),
+            obs.get("end_time"),
+            _json.dumps(obs.get("applications") or []),
+            _json.dumps(obs.get("entities") or []),
+            obs.get("activity_type"),
+            1 if obs.get("is_approved") else 0,
+            obs.get("created_at") or _now_iso(),
+        ),
+    )
+    conn.commit()
+
+
+def mark_observation_synced(conn: sqlite3.Connection, obs_id: str) -> None:
+    """Mark an observation as synced after a successful server push."""
+    conn.execute(
+        "UPDATE observations SET synced_at = ? WHERE id = ?",
+        (_now_iso(), obs_id),
+    )
+    conn.commit()
+
+
+def _now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 def _new_id() -> str:
