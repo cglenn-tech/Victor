@@ -481,5 +481,3 @@ ${episodesSummary}`;
 
   return Response.json({ report, id: savedId });
 }
-id: savedId });
-}
