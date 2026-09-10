@@ -47,6 +47,7 @@ load_dotenv()
 import config
 import database
 import finalizer
+import model_client
 import observer
 import realtime_client
 import sync
