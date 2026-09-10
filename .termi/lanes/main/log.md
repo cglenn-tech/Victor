@@ -241,3 +241,44 @@ Change the pipeline from 1 screenshot = 1 observation to:
 - After a successful observation is created, start a new batch.
 - Never process the same screenshot twice.
 - Define clear behavior for incomplet
+
+### 2026-09-10 21:51 — agent
+Taking this on — first I'll pull team memory, add it to the board, and inspect the existing app patterns (auth, API, migrations, UI) so the console matches the codebase.Patterns are clear so far. Now checking the UI side — home page, components, and the latest migration for SQL/RLS style.Migration and RLS style noted. Checking how existing episode screenshots are referenced and a card component for UI conventions.Patterns fully mapped. Checking one existing route test to mirror its mocking style, and whether this checkout has env vars for Supabase.All patterns mapped. Generating the three mock screenshots first, then the migration.Images done. Writing the migration — matching migration 006's sectioned style with RLS.Adding the `Observation` type next to `Episode` in `lib/types.ts`.Now the API routes — list, then edit/delete, then the seed.Course adjusted — pausing implementation immediately (four small files from the console task were already written; I'll report them and await your direction on keep/adjust/revert). Launching a deep inspection of the Python agent side and reading the web-side files in parallel.Agent-side findings are in. Now finishing the web-side: report pipeline, the "Observation Log" question, and branding sweep.Closing the last gaps: the report route's Claude call, the old capture/analyze route's callers, and the report UI.Inspection complete — no implementation written since your steer. Here are the findings.
+
+---
+
+## Findings
+
+**1. Screenshot capture — `agent/capture.py`**
+Per-window capture: macOS `CGWindowListCreateImage` (capture.py:63), Windows `PrintWindow` (capture.py:101); full-screen `mss` only when consent leases are off (capture.py:205). Loop every 5s (config.py:28); frame-diff skips unchanged screens (≤0.02 threshold, capture.py:220). High-value frames only saved as JPEG q85 ≤1440×900 to `~/.buildharvey/screenshots/` (observer.py:226). Consent-gated *before* any pixels (consent_manager.py:92). Screenshots are temporary: deleted at e
+
+### 2026-09-10 21:56 — cglenn
+Answers + Updated Direction
+
+Model client
+Desktop agent calls the self-hosted endpoint directly.
+Do not send screenshots through any web API route.
+Remove all Anthropic routes and Anthropic SDK usage from the project.
+There is no longer a “private mode” vs “cloud mode”. The entire product is private. The only allowed model is the self-hosted one configured via environment variables.
+
+Episodes vs Observations
+Keep the existing episode system (UI + sync already depend on it).
+New structured observations (from 5-screenshot batches) become the primary semantic unit.
+Episodes should be built from / grouped around these new observations rather than the old lightweight signals.
+
+Approve
+Yes. Add an is_approved (or reuse is_reportable) boolean on the observations table.
+
+Schema
+Extend the existing 018_observations table to support the structured fields (title, observation, start_time, end_time, applications, entities, activity_type, approval flag).
+Do not replace the table.
+
+
+Additional hard constraints
+
+Delete every Anthropic-related route and import.
+Production path = self-hosted model client only.
+Reuse the existing weekly report web pipeline; do not rebuild it.
+Be careful with branding changes that affect installer names, DMG, or the buildharvey:// URL scheme.
+
+Confirm you understand this direction, then proceed with the implementation plan.now
