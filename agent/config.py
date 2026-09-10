@@ -40,9 +40,6 @@ CASE_SWITCH_THRESHOLD = 3               # consecutive observations of the same n
 MIN_EPISODE_DURATION_MINUTES = 0.5      # episodes shorter than this are discarded
 MAX_KEY_OBSERVATIONS = 8               # max observations stored per episode
 
-# Max screenshots preserved per episode (evenly subsampled for evidence storage).
-MAX_VISION_SCREENSHOTS = 8
-
 # ── Screenshot compression for server-side vision analysis ────────────────────
 # Screenshots are resized and JPEG-compressed before being POSTed to the server.
 VISION_JPEG_QUALITY = 85
