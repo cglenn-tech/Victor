@@ -5,7 +5,6 @@ Syncs episodes and observations via device-token API routes — no database
 credentials, and no screenshots ever leave the device.
 """
 import json
-import os
 import queue
 import sqlite3
 import threading
@@ -13,7 +12,6 @@ import time as _time
 import traceback
 import urllib.request
 import urllib.error
-from pathlib import Path
 
 import auth
 import config
@@ -104,7 +102,8 @@ def _upsert(token: str | None, episode_dict: dict, conn: sqlite3.Connection) -> 
     if not token:
         return
     episode_id = episode_dict["id"]
-    evidence_paths = episode_dict.pop("evidence_paths", [])
+    # Strip legacy field — no screenshots are ever uploaded
+    episode_dict.pop("evidence_paths", None)
 
     for attempt in range(5):
         try:
