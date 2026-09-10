@@ -384,6 +384,11 @@ class EpisodeEngine:
 
     def _force_close(self, reason: str = "") -> Episode:
         ep = self.active
+        # A differing observation awaiting confirmation still happened during
+        # this episode's window — attach it before closing.
+        if self._pending_observation is not None:
+            ep.add_structured_observation(self._pending_observation)
+            self._pending_observation = None
         ep.close()
         self.active = None
         self._state = "idle"
