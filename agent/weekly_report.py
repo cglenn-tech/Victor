@@ -280,7 +280,7 @@ def _assemble_report(
       Time totals (Python-computed — never LLM-generated)
     """
     lines = [
-        f"BuildHarvey Weekly Report",
+        f"VICTOR Weekly Report",
         f"Period: {period_start[:10]} to {period_end[:10]}",
         f"Generated: {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}",
         "",

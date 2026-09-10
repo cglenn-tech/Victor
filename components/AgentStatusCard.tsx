@@ -220,7 +220,7 @@ export default function AgentStatusCard({ deviceId }: Props) {
             className="text-sm font-medium bg-neutral-900 text-white px-4 py-2 rounded
                        hover:bg-neutral-700 transition-colors"
           >
-            Open BuildHarvey
+            Open VICTOR
           </button>
           <DownloadButton label="Download Latest" />
         </div>
@@ -236,7 +236,7 @@ export default function AgentStatusCard({ deviceId }: Props) {
           <p className="text-sm font-medium text-neutral-700">{label}</p>
         </div>
         <p className="text-sm text-neutral-600 mb-3">
-          A newer version of BuildHarvey is required.
+          A newer version of VICTOR is required.
         </p>
         <DownloadButton label="Download Update" />
       </div>

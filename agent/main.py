@@ -59,7 +59,7 @@ def main(
     state_callback: Optional[Callable[[str], None]] = None,
     stop_event: Optional[threading.Event] = None,
 ) -> None:
-    print("[agent] BuildHarvey starting")
+    print("[agent] Victor starting")
     print(f"[agent] db {config.DB_PATH}")
 
     # Phase 2: purge stale temp frames on startup (crash safety net)

@@ -136,7 +136,7 @@ export default function AuthForm() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-white">
       <div className="w-full max-w-sm px-6">
-        <h1 className="text-lg font-semibold text-neutral-900 mb-6">BuildHarvey</h1>
+        <h1 className="text-lg font-semibold text-neutral-900 mb-6">VICTOR</h1>
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <input
@@ -192,7 +192,7 @@ export default function AuthForm() {
             </>
           ) : (
             <>
-              New to BuildHarvey?{' '}
+              New to VICTOR?{' '}
               <button
                 onClick={() => { setMode('signup'); setError('') }}
                 className="text-neutral-900 underline"

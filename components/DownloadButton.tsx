@@ -12,10 +12,10 @@ type State =
   | { status: 'auth_required' }
 
 const ERROR_MESSAGES: Record<string, string> = {
-  authentication_required:       'Sign in to download BuildHarvey.',
+  authentication_required:       'Sign in to download VICTOR.',
   email_verification_required:   'Verify your email before downloading.',
-  release_unavailable:           'The BuildHarvey installer is unavailable right now. Please try again shortly.',
-  invalid_release_configuration: 'The BuildHarvey installer is unavailable right now. Please try again shortly.',
+  release_unavailable:           'The VICTOR installer is unavailable right now. Please try again shortly.',
+  invalid_release_configuration: 'The VICTOR installer is unavailable right now. Please try again shortly.',
   too_many_requests:             'Too many download attempts. Please try again shortly.',
   download_failed:               'Download failed. Please try again.',
 }
@@ -106,7 +106,7 @@ export default function DownloadButton({ label }: Props) {
   const buttonLabel =
     state.status === 'preparing' ? 'Preparing download…'
     : state.status === 'failed'  ? 'Try again'
-    : label ?? 'Download BuildHarvey'
+    : label ?? 'Download VICTOR'
 
   const buttonDisabled =
     state.status === 'preparing' || state.status === 'unavailable'
@@ -136,7 +136,7 @@ export default function DownloadButton({ label }: Props) {
           <p>Your download has started.</p>
           {platform === 'windows' ? (
             <>
-              <p>Run <strong>{winFilename}</strong> to install BuildHarvey.</p>
+              <p>Run <strong>{winFilename}</strong> to install VICTOR.</p>
               <p className="text-neutral-500 text-xs mt-1">
                 If Windows shows a SmartScreen warning, click{' '}
                 <strong>More info</strong> then <strong>Run anyway</strong>.
@@ -144,9 +144,9 @@ export default function DownloadButton({ label }: Props) {
             </>
           ) : (
             <>
-              <p>Open the DMG, drag BuildHarvey to Applications.</p>
+              <p>Open the DMG, drag VICTOR to Applications.</p>
               <p className="text-neutral-500 text-xs mt-1">
-                On first open: right-click BuildHarvey → <strong>Open</strong> →{' '}
+                On first open: right-click VICTOR → <strong>Open</strong> →{' '}
                 <strong>Open</strong> to bypass Gatekeeper.
               </p>
             </>

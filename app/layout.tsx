@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "BuildHarvey",
+  title: "VICTOR",
   description: "Observe work, group it into episodes, review and export.",
 };
 

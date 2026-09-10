@@ -17,7 +17,7 @@ export default function AppNav() {
     <nav className="border-b border-neutral-100 mb-8">
       <div className="max-w-2xl mx-auto px-6 py-4 flex items-center justify-between">
         <Link href="/" className="text-sm font-semibold text-neutral-900">
-          BuildHarvey
+          VICTOR
         </Link>
         <div className="flex items-center gap-6">
           <Link

@@ -213,7 +213,7 @@ def _connect_encrypted() -> '_APSWCompatWrapper':
     except Exception as exc:
         conn.close()
         raise RuntimeError(
-            "Unable to unlock encrypted BuildHarvey database. "
+            "Unable to unlock encrypted VICTOR database. "
             "The key may be incorrect or the database may be corrupted."
         ) from exc
 

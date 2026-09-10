@@ -235,9 +235,9 @@ class ConsentManager:
 
             def show():
                 alert = AppKit.NSAlert.alloc().init()
-                alert.setMessageText_("BuildHarvey \u2014 Allow Observation?")
+                alert.setMessageText_("VICTOR \u2014 Allow Observation?")
                 alert.setInformativeText_(
-                    f"BuildHarvey would like to observe:\n\n"
+                    f"VICTOR would like to observe:\n\n"
                     f"{label}\n\n"
                     f"This window has not been previously authorized. "
                     f"Work content remains on your device. "
@@ -286,7 +286,7 @@ class ConsentManager:
             key = identity.auth_key()
             label = identity.display_label()
             message = (
-                f"BuildHarvey would like to observe:\n\n{label}\n\n"
+                f"VICTOR would like to observe:\n\n{label}\n\n"
                 "Work content remains on your device. Authorization expires on lock/restart.\n\n"
                 "Allow observation of this window?"
             )
@@ -296,7 +296,7 @@ class ConsentManager:
                 result = ctypes.windll.user32.MessageBoxTimeoutW(
                     None,
                     message,
-                    "BuildHarvey \u2014 Allow Observation?",
+                    "VICTOR \u2014 Allow Observation?",
                     MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2,
                     0,
                     config.CONSENT_DIALOG_TIMEOUT_SECONDS * 1000,
@@ -306,7 +306,7 @@ class ConsentManager:
                 result = ctypes.windll.user32.MessageBoxW(
                     None,
                     message,
-                    "BuildHarvey \u2014 Allow Observation?",
+                    "VICTOR \u2014 Allow Observation?",
                     MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2,
                 )
 
@@ -354,9 +354,9 @@ class ConsentManager:
 
             def show():
                 alert = AppKit.NSAlert.alloc().init()
-                alert.setMessageText_("BuildHarvey \u2014 Resume Observation?")
+                alert.setMessageText_("VICTOR \u2014 Resume Observation?")
                 alert.setInformativeText_(
-                    "BuildHarvey was observing these windows before your Mac was locked:\n\n"
+                    "VICTOR was observing these windows before your Mac was locked:\n\n"
                     f"{window_list}\n\n"
                     "Work content remains on your device."
                 )
@@ -409,7 +409,7 @@ class ConsentManager:
                 for l in leases
             )
             message = (
-                "BuildHarvey was observing these windows before your computer was locked:\n\n"
+                "VICTOR was observing these windows before your computer was locked:\n\n"
                 f"{window_list}\n\n"
                 "Work content remains on your device.\n\n"
                 "Resume observation of all these windows?"
@@ -419,7 +419,7 @@ class ConsentManager:
                 result = ctypes.windll.user32.MessageBoxTimeoutW(
                     None,
                     message,
-                    "BuildHarvey \u2014 Resume Observation?",
+                    "VICTOR \u2014 Resume Observation?",
                     MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2,
                     0,
                     config.BATCH_RECONSENT_TIMEOUT_SECONDS * 1000,
@@ -428,7 +428,7 @@ class ConsentManager:
                 result = ctypes.windll.user32.MessageBoxW(
                     None,
                     message,
-                    "BuildHarvey \u2014 Resume Observation?",
+                    "VICTOR \u2014 Resume Observation?",
                     MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2,
                 )
 

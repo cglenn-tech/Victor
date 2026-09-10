@@ -21,7 +21,7 @@ export default async function DownloadPage() {
     <main className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm space-y-6">
         <div>
-          <h1 className="text-xl font-semibold text-neutral-900">Download BuildHarvey</h1>
+          <h1 className="text-xl font-semibold text-neutral-900">Download VICTOR</h1>
           <p className="text-sm text-neutral-500 mt-1">
             Install the desktop agent to start capturing your work automatically.
           </p>

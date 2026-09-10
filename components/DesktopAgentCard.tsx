@@ -49,7 +49,7 @@ export default function DesktopAgentCard() {
     return (
       <div className="border border-neutral-200 rounded-xl p-5 mb-6">
         <p className="text-sm text-neutral-600 mb-3">
-          Install the BuildHarvey desktop app to start capturing your work.
+          Install the VICTOR desktop app to start capturing your work.
           Your browser does not need to stay open while recording.
         </p>
         <DownloadButton />
@@ -61,7 +61,7 @@ export default function DesktopAgentCard() {
     <div>
       <AgentStatusCard deviceId={fetchState.deviceId} />
       <p className="text-xs text-neutral-400 -mt-4 mb-6 px-1">
-        You may close this page. The BuildHarvey desktop app will continue recording.
+        You may close this page. The VICTOR desktop app will continue recording.
       </p>
     </div>
   )
