@@ -202,3 +202,42 @@ When finished, tell me:
 * exactly which files were added/changed
 * whether any SQL/migration needs to be run
 * the exact steps I should use to test edit and delete
+
+### 2026-09-10 21:42 — cglenn
+You are working inside the existing Victor codebase.
+
+CRITICAL RULES
+- Do not rebuild any major subsystem from scratch.
+- First inspect the current implementation thoroughly.
+- Before writing any code, report back with:
+  1. Current screenshot capture location + how it works
+  2. Current observation generation flow
+  3. Current model/API client(s) being used (Claude/Anthropic/etc.)
+  4. Observation Log implementation + storage
+  5. Existing weekly report generation code
+  6. Current database schema related to observations/reports
+  7. Any remaining BuildHarvey / BH branding that is user-visible
+- Only after I confirm your findings should you begin implementation.
+- If you cannot locate a critical piece, stop and ask. Do not invent.
+
+GOAL
+Finish the migration from the old BuildHarvey-style pipeline to the new Victor architecture.
+
+### 1. Model Client
+- Find every place that currently calls Claude / Anthropic / external vision models for screenshot analysis.
+- Replace them with a single clean model client that reads from environment variables (already present for the self-hosted endpoint).
+- Do not hardcode URL or API key.
+- Assume the endpoint may be OpenAI-compatible unless the existing code proves otherwise. Design the client so the backend can be swapped later with minimal changes.
+- Centralize all model calls through this one client.
+
+### 2. Screenshot → Observation (batch of ~5)
+Change the pipeline from 1 screenshot = 1 observation to:
+
+- Capture screenshots using the existing desktop agent.
+- Collect existing lightweight metadata (timestamp, active app, window title, any short context already available).
+- Accumulate approximately 5 sequential screenshots.
+- Send the batch + metadata to the vision model in one request.
+- Model returns one structured observation that describes the work that occurred across the sequence.
+- After a successful observation is created, start a new batch.
+- Never process the same screenshot twice.
+- Define clear behavior for incomplet
