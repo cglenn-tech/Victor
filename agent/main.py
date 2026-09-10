@@ -80,7 +80,6 @@ def main(
                     + (f"/{total // (1024*1024)}MB" if total else "")
                 )
             )
-
     realtime_client.start()
 
     conn = database.connect()
@@ -113,6 +112,7 @@ def main(
             consent_manager.begin_batch_reconsent(invalidated)
 
     engine = EpisodeEngine()
+    batcher = vision.ObservationBatcher()
     sync.start()
 
     _ws_state = 'idle'                  # tracks last state broadcast to realtime_client
@@ -121,6 +121,7 @@ def main(
     while True:
         if stop_event is not None and stop_event.is_set():
             print("[agent] stop_event set — shutting down")
+            _flush_batcher(conn, engine, batcher)
             if engine.active:
                 engine.active.close()
                 _close_and_save(conn, engine.active)
@@ -134,7 +135,7 @@ def main(
                     realtime_client.set_status('recording')
                     _ws_state = 'recording'
                 try:
-                    _open_gap_id = _cycle(conn, engine, consent_manager, _open_gap_id)
+                    _open_gap_id = _cycle(conn, engine, batcher, consent_manager, _open_gap_id)
                 except Exception:
                     traceback.print_exc()
                     try:
@@ -145,7 +146,8 @@ def main(
                     state_callback('recording' if engine.active else 'waiting')
                 time.sleep(config.CAPTURE_INTERVAL_SECONDS)
             else:
-                # No active work session — finalize and idle
+                # No active work session — flush any pending batch, finalize and idle
+                _flush_batcher(conn, engine, batcher)
                 if engine.active:
                     engine.active.close()
                     _close_and_save(conn, engine.active)
@@ -162,6 +164,7 @@ def main(
                 time.sleep(30)   # check every 30s while idle
         except KeyboardInterrupt:
             print("\n[agent] shutting down")
+            _flush_batcher(conn, engine, batcher)
             if engine.active:
                 engine.active.close()
                 _close_and_save(conn, engine.active)
@@ -177,6 +180,7 @@ def main(
 def _cycle(
     conn,
     engine: EpisodeEngine,
+    batcher: vision.ObservationBatcher,
     consent_manager,
     open_gap_id: Optional[str],
 ) -> Optional[str]:
@@ -214,29 +218,19 @@ def _cycle(
         return open_gap_id
 
     if obs.screenshot_path:
-        # Deterministic boundary check — avoids model call when signal is clear
-        deterministic = engine.check_deterministic_boundary(obs, engine.active)
-        if deterministic is True:
-            # Definitive new episode — close current and let vision open new one
-            ctx = engine.get_context()
-            evidence = vision.analyze(obs, ctx)
-            result = engine.ingest_vision(evidence, obs)
-        elif deterministic is False and engine.active:
-            # Definitive continue — no model call needed; update metadata only
-            engine.ingest_metadata(obs)
-            result = None
-        else:
-            # Ambiguous — invoke local model for classification
-            ctx = engine.get_context()
-            evidence = vision.analyze(obs, ctx)
-            result = engine.ingest_vision(evidence, obs)
+        # Accumulate the screenshot into the next batch; a full batch produces
+        # one structured observation which drives episode grouping.
+        so = batcher.add(obs)
+        if so is not None:
+            _handle_observation(conn, engine, so)
     else:
         # Metadata path: track context only, never open/close episodes
         engine.ingest_metadata(obs)
-        result = None
 
-    if result and result.closed_episode:
-        _close_and_save(conn, result.closed_episode)
+    # Flush a partial batch when no new screenshots have arrived for a while
+    so = batcher.maybe_idle_flush()
+    if so is not None:
+        _handle_observation(conn, engine, so)
 
     # Also check inactivity in case of long metadata-only stretches
     closed = engine.check_inactivity(now)
@@ -244,6 +238,27 @@ def _cycle(
         _close_and_save(conn, closed)
 
     return open_gap_id
+
+
+def _handle_observation(conn, engine: EpisodeEngine, so) -> None:
+    """Persist + sync a completed observation, then group it into an episode."""
+    result = engine.ingest_observation(so)
+    episode_id = engine.active.id if engine.active else None
+    obs_dict = so.to_dict(episode_id=episode_id)
+    database.save_observation(conn, obs_dict)
+    sync.enqueue_observation(obs_dict)
+    if result and result.closed_episode:
+        _close_and_save(conn, result.closed_episode)
+
+
+def _flush_batcher(conn, engine: EpisodeEngine, batcher) -> None:
+    """Complete any pending batch (e.g. at session end) before closing episodes."""
+    try:
+        so = batcher.flush(force=True)
+        if so is not None:
+            _handle_observation(conn, engine, so)
+    except Exception:
+        traceback.print_exc()
 
 
 def _close_and_save(conn, episode: Episode) -> None:
