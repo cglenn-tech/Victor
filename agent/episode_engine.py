@@ -19,7 +19,7 @@ from typing import Literal, Optional
 
 import config
 from bh_logging import get_logger
-from episode import Episode, ScreenshotEvidence, new_episode
+from episode import Episode, ScreenshotEvidence, StructuredObservation, new_episode
 from observer import Observation
 
 log = get_logger("engine")
@@ -45,7 +45,110 @@ class EpisodeEngine:
         self._current_url: str = ""
         self._current_window: str = ""
 
+        # Current activity identity (from the latest structured observation)
+        self._current_activity_type: str = ""
+        self._current_applications: list[str] = []
+
+        # Observation held while awaiting 2-signal confirmation of a switch
+        self._pending_observation: Optional[StructuredObservation] = None
+
     # ── Public API ─────────────────────────────────────────────────────────────
+
+    def ingest_observation(
+        self, so: StructuredObservation
+    ) -> Optional[EngineResult]:
+        """
+        Process a completed structured observation (model output for a
+        ~5-screenshot batch). Episodes are grouped around these:
+          - same activity_type or application overlap → continue current episode
+          - different activity and no overlap → 2-signal hysteresis switch
+
+        Returns EngineResult (with optional closed_episode) or None.
+        """
+        if self._state == "idle":
+            return self._open_episode_from_observation(so)
+
+        if self._same_activity(so):
+            # A differing observation that never confirmed snaps back here
+            if self._state == "transitioning":
+                self._state = "active"
+                self._consecutive_new_episode = 0
+                self._candidate_name = ""
+            if self._pending_observation is not None:
+                self.active.add_structured_observation(self._pending_observation)
+                self._pending_observation = None
+            self._attach(so)
+            return EngineResult(active_episode=self.active)
+
+        # Different activity — 2-signal hysteresis
+        if self._state == "transitioning":
+            # Second consecutive differing observation → confirmed switch
+            return self._close_and_open_from_observation(so)
+
+        self._state = "transitioning"
+        self._consecutive_new_episode = 1
+        self._candidate_name = so.title
+        self._pending_observation = so
+        log.info("engine.transitioning", candidate=so.title, current=self.active.case_name)
+        return EngineResult(active_episode=self.active)
+
+    def _same_activity(self, so: StructuredObservation) -> bool:
+        """True when the observation clearly belongs to the current episode."""
+        if so.activity_type and so.activity_type == self._current_activity_type:
+            return True
+        if self._current_applications and so.applications:
+            overlap = {a.lower() for a in so.applications} & {
+                a.lower() for a in self._current_applications
+            }
+            if overlap:
+                return True
+        return False
+
+    def _attach(self, so: StructuredObservation) -> None:
+        """Attach an observation to the active episode and update activity identity."""
+        self.active.add_structured_observation(so)
+        self._current_activity_type = so.activity_type or self._current_activity_type
+        if so.applications:
+            merged = list(self._current_applications)
+            for app in so.applications:
+                if app.lower() not in [a.lower() for a in merged]:
+                    merged.append(app)
+            self._current_applications = merged[:10]
+
+    def _open_episode_from_observation(
+        self, so: StructuredObservation, name: Optional[str] = None
+    ) -> EngineResult:
+        ep = new_episode(name or so.title or "Untitled work", issue_worked_on=None, work_type="project")
+        self.active = ep
+        self._state = "active"
+        self._consecutive_new_episode = 0
+        self._candidate_name = ""
+        self._pending_observation = None
+        self._current_activity_type = so.activity_type or ""
+        self._current_applications = list(so.applications or [])
+        ep.add_structured_observation(so)
+        ep.resume_timing()
+        log.info("engine.episode_opened", episode=ep.case_name)
+        return EngineResult(active_episode=ep)
+
+    def _close_and_open_from_observation(
+        self, so: StructuredObservation
+    ) -> EngineResult:
+        """Second differing observation confirmed — close current, open new."""
+        closed = self.active
+        # The held observation belongs to the activity we are switching into
+        pending = self._pending_observation
+        self.active = None
+        self._state = "idle"
+        self._pending_observation = None
+
+        name = self._candidate_name or so.title
+        result = self._open_episode_from_observation(so, name=name)
+        if pending is not None:
+            result.active_episode.add_structured_observation(pending)
+        result.closed_episode = closed
+        closed.close()
+        return result
 
     def ingest_vision(
         self, evidence: Optional[ScreenshotEvidence], obs: Observation
