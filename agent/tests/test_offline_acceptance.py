@@ -275,8 +275,13 @@ class TestOfflineAcceptance(unittest.TestCase):
                 batcher = vision.ObservationBatcher()
                 self.assertIsNone(batcher.add(_FakeObs()))
                 self.assertEqual(len(batcher), 1)
+                # Unconfigured endpoint → None each time; batch retained for retry
                 self.assertIsNone(batcher.flush(force=True))
-                # Batch dropped after max attempts — screenshots cleaned up, no crash
+                self.assertEqual(len(batcher), 1)
+                self.assertIsNone(batcher.flush(force=True))
+                self.assertIsNone(batcher.flush(force=True))
+                # Third failure exhausts BATCH_MAX_ATTEMPTS → dropped, no crash
+                self.assertEqual(len(batcher), 0)
         finally:
             _enforce_private_mode()
 
