@@ -5,24 +5,20 @@ Runs once when an episode closes, before it is persisted.
 
 Screenshot lifecycle (Phase 2 target: zero persistent raw screenshots):
   - Raw frames are ephemeral: captured to /tmp, used for OCR/diff, then overwritten.
-  - evidence/ directory and the up-to-8-frames persistence are REMOVED.
+  - The batcher deletes each screenshot as soon as its batch is processed.
   - Structured Episode data (key_observations, activity_classification, confidence)
     survives; raw frames do not.
-  - episode.evidence_paths is set to [] — screenshots are never moved or retained.
 
 Key observations path (in priority order):
-  1. LocalInferenceBackend (USE_LOCAL_INFERENCE=true) — fully on-device
-  2. /api/agent/finalize server call (USE_LOCAL_INFERENCE=false, token available)
+  1. Structured observations attached to the episode (model batch output)
+  2. LocalInferenceBackend (USE_LOCAL_INFERENCE=true) — fully on-device
   3. Template fallback — deterministic, no network
 
 Core philosophy: produce observations that read like an executive assistant
 summarized the work — not browser history. Synthesize. Connect. Reconstruct.
 """
-import json
-import urllib.request
 from pathlib import Path
 
-import auth
 import config
 import observations as obs_mod
 from bh_logging import get_logger
@@ -62,13 +58,11 @@ def _generate_observations(
     Generate key observations for a closed episode.
     Returns: (key_observations, activity_classification, classification_confidence, inference_failed)
     """
+    if episode._structured_observations:
+        return _structured_key_observations(episode)
+
     if config.USE_LOCAL_INFERENCE:
         result = _local_observations(episode)
-        if result is not None:
-            return result
-
-    if not config.PRIVATE_MODE:
-        result = _server_observations(episode)
         if result is not None:
             return result
 
@@ -76,6 +70,36 @@ def _generate_observations(
     # inference_failed=True if local was expected but unavailable
     inference_failed = config.USE_LOCAL_INFERENCE
     return obs, None, None, inference_failed
+
+
+# ── Structured observations path (primary) ──────────────────────────────────
+
+def _structured_key_observations(
+    episode: Episode,
+) -> tuple[list[KeyObservation], str | None, float | None, bool]:
+    """Build key observations from the structured model observations on this episode."""
+    key_obs: list[KeyObservation] = []
+    seen: set[str] = set()
+    for so in episode._structured_observations:
+        text = so.observation.strip()
+        title = so.title.strip()
+        if title and not text.lower().startswith(title.lower()):
+            text = f"{title}: {text}"
+        if not text or text.lower() in seen:
+            continue
+        seen.add(text.lower())
+        stamp = (so.start_time or "")[11:16] or episode.started_at[11:16]
+        key_obs.append(KeyObservation(timestamp=stamp, text=text))
+        if len(key_obs) >= config.MAX_KEY_OBSERVATIONS:
+            break
+
+    counts: dict[str, int] = {}
+    for so in episode._structured_observations:
+        if so.activity_type:
+            counts[so.activity_type] = counts.get(so.activity_type, 0) + 1
+    activity = max(counts, key=counts.get) if counts else None
+
+    return key_obs, activity, None, False
 
 
 # ── Local inference path (Phase 3+) ───────────────────────────────────────────
