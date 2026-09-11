@@ -34,15 +34,18 @@ export default function AuthForm() {
         })
         const body = await res.json().catch(() => ({}))
         if (res.status === 429) {
+          setStage('idle')
           setError(body.error ?? 'Too many attempts. Please wait a moment and try again.')
           return
         }
         if (!res.ok) {
+          setStage('idle')
           setError("We couldn't send the reset email. Please try again shortly.")
           return
         }
         setStage('sent')
       } catch {
+        setStage('idle')
         setError("We couldn't send the reset email. Please try again shortly.")
       }
       return
