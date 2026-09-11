@@ -216,7 +216,7 @@ export default function AuthForm() {
 
           <button
             type="submit"
-            disabled={stage !== 'idle' || !showPassword}
+            disabled={stage !== 'idle' || (mode === 'forgot' ? !email.includes('@') : !showPassword)}
             className="w-full bg-neutral-900 text-white rounded px-3 py-2 text-sm font-medium disabled:opacity-40"
           >
             {buttonText}
