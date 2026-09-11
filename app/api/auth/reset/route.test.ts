@@ -67,4 +67,32 @@ describe('POST /api/auth/reset', () => {
     const res = await POST(req({ email: 'someone@example.com' }) as never)
     expect(res.status).toBe(429)
   })
+
+  it('rate limits per IP (coarser ceiling, distinct from the email key)', async () => {
+    mockAuth()
+    vi.mocked(rateLimit).mockImplementation(async (key: string) =>
+      key.startsWith('reset-ip:')
+    )
+    const res = await POST(req({ email: 'a@example.com' }) as never)
+    expect(res.status).toBe(429)
+    const keys = vi.mocked(rateLimit).mock.calls.map((c) => c[0])
+    expect(keys).toContain('reset-ip:1.2.3.4')
+    expect(keys).toContain('reset:a@example.com')
+  })
+
+  it('reads the client IP from x-forwarded-for', async () => {
+    mockAuth()
+    const request = new Request('http://localhost:3000/api/auth/reset', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-forwarded-for': '9.9.9.9, 10.0.0.1',
+      },
+      body: JSON.stringify({ email: 'a@example.com' }),
+    })
+    const res = await POST(request as never)
+    expect(res.status).toBe(200)
+    const keys = vi.mocked(rateLimit).mock.calls.map((c) => c[0])
+    expect(keys).toContain('reset-ip:9.9.9.9')
+  })
 })
