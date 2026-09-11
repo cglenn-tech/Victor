@@ -4,8 +4,8 @@ import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { getBrowserClient } from '@/lib/supabase-browser'
 
-type Mode = 'signup' | 'signin'
-type Stage = 'idle' | 'creating'
+type Mode = 'signup' | 'signin' | 'forgot'
+type Stage = 'idle' | 'creating' | 'sending' | 'sent'
 
 export default function AuthForm() {
   const router = useRouter()
