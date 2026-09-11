@@ -418,3 +418,29 @@ Adding the flow task to the board, pulling memory, and reading the auth surface 
 
 ### 2026-09-11 01:08 — cglenn
 are you done. can you push to git
+
+### 2026-09-11 01:09 — agent
+Checking that everything is committed and synced with GitHub.Everything's done and synced — main is at `c44e7ac` on GitHub with all the work (console, migration, cleanup, reset flow). The only uncommitted file is termi's own session log; committing and pushing it now so the repo is fully clean.Yes — all done and fully pushed. `origin/main` is at `f41153e`, working tree clean (the only untracked item is the Issues worktree marker, which is local-only). Everything from this session is on GitHub: the Observation Console, the self-hosted model migration, cleanup/hardening, and the reset-password flow.
+
+Heads up: a new `rename/victor-branding` branch just appeared on the remote — someone's started branding-rename work, likely to overlap the strings I touched. Worth coordinating before it merges.
+[actions: bash git status --short --branch | head -5; git log origin/ma · bash git add .termi/lanes/main/log.md && git commit -m "chore]
+
+### 2026-09-11 01:15 — cglenn
+Audit and harden the live password-reset flow on main. Do not open a PR; stay on this lane. Do not change the public “we always say the email is on its way” behavior.
+Must-fix (security)
+
+Recovery-only gate on set-password
+updateUser({ password }) on /auth/reset may only run after a successful recovery exchange (verifyOtp({ token_hash, type: 'recovery' }) or a PKCE code that produced a recovery session).
+Reject type=email|invite|email_change|magiclink.
+If the visitor already has a normal signed-in session and no valid recovery token, do not offer set-password on this page (send them to account settings / sign-in).
+After a successful exchange, strip code / token_hash / type from the URL (replaceState) and set referrerPolicy=no-referrer on that page so the token never hits Referer, logs, or analytics.
+Email link must not be pre-consumed
+Confirm the Reset Password template does not use a raw {{ .ConfirmationURL }} that hits Supabase verify before our app (scanners consume it; the interstitial never gets a chance).
+Preferred link shape (lands on our interstitial only):
+{{ .SiteURL }}/auth/reset?token_hash={{ .TokenHash }}&type=recovery
+Keep the explicit-click exchange. Reload of the interstitial must not consume the token.
+If we also accept ?code=, document that PKCE only works in the same browser that requested the reset (verifier cookie). Cross-device resets must use token_hash. Do not treat a failed PKCE exchange as “invalid password.”
+After password change, kill other sessions
+On successful updateUser({ password }), revoke other sessions (signOut({ scope: 'others' }) or project “single session” — pick one and test). Attacker with an old refresh token must be kicked. Keep the current browser signed in and redirect home.
+Password rules are server-side, not just mismatch UI
+Enforce min length (and whatever the project already uses) on the update call. Empty/short/identical-mismatch never reach a success redirect. If HaveIBeenPwned is available in the dashboard, turn it
