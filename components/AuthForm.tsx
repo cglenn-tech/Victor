@@ -17,12 +17,36 @@ export default function AuthForm() {
   const [showSlowCreating, setShowSlowCreating] = useState(false)
   const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const showPassword = email.includes('@') && email.includes('.')
+  const showPassword = mode !== 'forgot' && email.includes('@') && email.includes('.')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (stage !== 'idle') return
     setError('')
+
+    if (mode === 'forgot') {
+      setStage('sending')
+      try {
+        const res = await fetch('/api/auth/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        })
+        const body = await res.json().catch(() => ({}))
+        if (res.status === 429) {
+          setError(body.error ?? 'Too many attempts. Please wait a moment and try again.')
+          return
+        }
+        if (!res.ok) {
+          setError("We couldn't send the reset email. Please try again shortly.")
+          return
+        }
+        setStage('sent')
+      } catch {
+        setError("We couldn't send the reset email. Please try again shortly.")
+      }
+      return
+    }
 
     const supabase = getBrowserClient()
 
