@@ -161,6 +161,28 @@ export default function AuthForm() {
     : mode === 'signup' ? 'Continue'
     : 'Sign in'
 
+  if (stage === 'sent') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="w-full max-w-sm px-6">
+          <h1 className="text-lg font-semibold text-neutral-900 mb-6">VICTOR</h1>
+          <p className="text-sm text-neutral-900 mb-2">
+            If an account exists for {email}, a password reset link is on its way.
+          </p>
+          <p className="text-sm text-neutral-500 mb-6">
+            The link expires shortly. Check your spam folder if you don’t see it.
+          </p>
+          <button
+            onClick={() => { setMode('signin'); setStage('idle'); setError('') }}
+            className="text-sm text-neutral-900 underline"
+          >
+            Back to sign in
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-white">
       <div className="w-full max-w-sm px-6">
@@ -200,6 +222,18 @@ export default function AuthForm() {
             {buttonText}
           </button>
 
+          {mode === 'signin' && (
+            <p className="text-sm">
+              <button
+                type="button"
+                onClick={() => { setMode('forgot'); setError('') }}
+                className="text-neutral-500 underline hover:text-neutral-900"
+              >
+                Forgot password?
+              </button>
+            </p>
+          )}
+
           {showSlowCreating && (
             <p className="text-sm text-neutral-500 mt-2">
               Still creating… this is taking a moment.
@@ -216,6 +250,16 @@ export default function AuthForm() {
                 className="text-neutral-900 underline"
               >
                 Sign in
+              </button>
+            </>
+          ) : mode === 'forgot' ? (
+            <>
+              Remembered it?{' '}
+              <button
+                onClick={() => { setMode('signin'); setError('') }}
+                className="text-neutral-900 underline"
+              >
+                Back to sign in
               </button>
             </>
           ) : (
