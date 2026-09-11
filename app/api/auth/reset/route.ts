@@ -23,6 +23,22 @@ export async function POST(request: NextRequest) {
   const t0 = Date.now()
   console.log('[reset] requested', { email, t: t0 })
 
+  // Coarse per-IP ceiling so one source cannot spray the whole user list.
+  // Keys are prefixed distinctly (reset: / reset-ip:) so this limiter never
+  // starves the resend limiter or vice versa.
+  const ip =
+    request.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
+    request.headers.get('x-real-ip') ||
+    'unknown'
+  const ipBlocked = await rateLimit(`reset-ip:${ip}`, 10, 3600)
+  if (ipBlocked) {
+    console.log('[reset] rate limited (ip)', { ip })
+    return Response.json(
+      { error: 'Too many password resets requested. Please wait before trying again.' },
+      { status: 429 },
+    )
+  }
+
   const blocked = await rateLimit(`reset:${email.toLowerCase()}`, 3, 3600)
   if (blocked) {
     console.log('[reset] rate limited', { email })
