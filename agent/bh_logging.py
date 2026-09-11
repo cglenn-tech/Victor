@@ -95,8 +95,8 @@ def _build_handler() -> logging.Handler:
     return handler
 
 
-# Root logger for BuildHarvey — all module loggers inherit from this.
-_root = logging.getLogger("buildharvey")
+# Root logger for Victor — all module loggers inherit from this.
+_root = logging.getLogger("victor")
 if not _root.handlers:
     _root.addHandler(_build_handler())
 _root.setLevel(_LOG_LEVEL)
@@ -110,7 +110,7 @@ class BHLogger:
     """
 
     def __init__(self, name: str) -> None:
-        self._logger = logging.getLogger(f"buildharvey.{name}")
+        self._logger = logging.getLogger(f"victor.{name}")
 
     def info(self, msg: str, **kwargs: Any) -> None:
         self._log(logging.INFO, msg, **kwargs)

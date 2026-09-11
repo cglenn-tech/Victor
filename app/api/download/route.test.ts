@@ -194,14 +194,14 @@ describe('POST /api/download (macOS)', () => {
     expect(body.sha256).toBe('b'.repeat(64))
   })
 
-  it('uses BuildHarvey-{version}.dmg as the download filename in the signed URL', async () => {
+  it('uses Victor-{version}.dmg as the download filename in the signed URL', async () => {
     mockAuth({})
     const { mockCreateSignedUrl } = mockAdmin()
     await POST()
     expect(mockCreateSignedUrl).toHaveBeenCalledWith(
       VALID_RELEASE.storage_path,
       300,
-      { download: 'BuildHarvey-1.0.2.dmg' },
+      { download: 'Victor-1.0.2.dmg' },
     )
   })
 })
