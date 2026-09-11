@@ -85,7 +85,7 @@ export async function POST() {
 
   // 10. Create signed URL with download filename
   const safeVersion = release.version.replace(/[^a-zA-Z0-9.\-_]/g, '_')
-  const downloadName = `BuildHarvey-${safeVersion}.dmg`
+  const downloadName = `Victor-${safeVersion}.dmg`
 
   const { data: signedData, error: signError } = await admin.storage
     .from('releases')

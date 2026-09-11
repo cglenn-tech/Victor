@@ -30,13 +30,13 @@ from bh_logging import get_logger
 log = get_logger("observer")
 
 # Apps that must never generate Episodes.
-# The agent itself and OS-level UIs are excluded to prevent "BuildHarvey" or
+# The agent itself and OS-level UIs are excluded to prevent "Victor" or
 # "loginwindow" from appearing as case names in the Episode Engine.
 _SYSTEM_APPS = frozenset({
     '', 'loginwindow', 'SystemPreferences', 'System Preferences',
     'System Settings', 'Spotlight', 'Dock', 'Finder',
     'SecurityAgent', 'UserNotificationCenter',
-    'BuildHarvey',      # the agent itself (macOS)
+    'Victor', 'BuildHarvey',  # agent itself (current + legacy)
     'Task Manager',     # Windows
     'Explorer',         # Windows File Explorer
 })
@@ -264,7 +264,7 @@ def is_user_work(obs: 'Observation') -> bool:
         return False
     if not app and not obs.window_title:
         return False
-    if 'buildharvey' in app.lower():
+    if 'victor' in app.lower() or 'buildharvey' in app.lower():
         return False
     return True
 

@@ -1,6 +1,6 @@
 /**
  * Shared 12-hour time formatters.
- * All timestamps in the BuildHarvey UI use these functions for consistency.
+ * All timestamps in the Victor UI use these functions for consistency.
  */
 
 export function fmt12Time(iso: string): string {

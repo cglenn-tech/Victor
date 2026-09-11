@@ -1,5 +1,5 @@
 """
-BuildHarvey Desktop Agent — headless background daemon.
+Victor Desktop Agent — headless background daemon.
 
 Run:  python main.py
       (or launched automatically by app.py after credential and permissions are set up)

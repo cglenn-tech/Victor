@@ -5,9 +5,9 @@
   <key>CFBundleIdentifier</key>
   <string>com.buildharvey.agent</string>
   <key>CFBundleName</key>
-  <string>BuildHarvey</string>
+  <string>Victor</string>
   <key>CFBundleDisplayName</key>
-  <string>BuildHarvey</string>
+  <string>Victor</string>
   <key>CFBundleVersion</key>
   <string>1.0</string>
   <key>CFBundleShortVersionString</key>
@@ -18,7 +18,7 @@
   <string>NSApplication</string>
   <!-- Required: usage description shown in the Screen Recording TCC dialog -->
   <key>NSScreenCaptureUsageDescription</key>
-  <string>BuildHarvey needs permission to observe your work so it can organize completed tasks into your weekly report.</string>
+  <string>Victor needs permission to observe your work so it can organize completed tasks into your weekly report.</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
 </dict>

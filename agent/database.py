@@ -86,7 +86,7 @@ def _detect_db_state(db_path) -> str:
 
 def _migrate_plaintext_to_encrypted(db_path: Path, key: str) -> None:
     """
-    One-time in-place encryption of an existing plaintext BuildHarvey database.
+    One-time in-place encryption of an existing plaintext Victor database.
 
     Safety contract:
     - An atomic backup is created before any mutation.
@@ -618,7 +618,7 @@ def annotate_gap(conn: sqlite3.Connection, gap_id: str, note: str) -> None:
 
 def delete_all_local_data(conn: sqlite3.Connection) -> None:
     """
-    Irreversibly delete all BuildHarvey local data.
+    Irreversibly delete all Victor local data.
 
     Covers:
       - SQLite DB + WAL/SHM files
