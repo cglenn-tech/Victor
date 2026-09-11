@@ -39,7 +39,9 @@ describe('POST /api/auth/reset', () => {
 
   it('rate limits per email and returns 429', async () => {
     mockAuth()
-    vi.mocked(rateLimit).mockResolvedValue(true)
+    vi.mocked(rateLimit).mockImplementation(async (key: string) =>
+      key.startsWith('reset:')
+    )
     const res = await POST(req({ email: 'someone@example.com' }) as never)
     expect(res.status).toBe(429)
     expect(vi.mocked(rateLimit)).toHaveBeenCalledWith('reset:someone@example.com', 3, 3600)
@@ -76,7 +78,7 @@ describe('POST /api/auth/reset', () => {
     const res = await POST(req({ email: 'a@example.com' }) as never)
     expect(res.status).toBe(429)
     const keys = vi.mocked(rateLimit).mock.calls.map((c) => c[0])
-    expect(keys).toContain('reset-ip:1.2.3.4')
+    expect(keys).toContain('reset-ip:unknown')
     expect(keys).toContain('reset:a@example.com')
   })
 
