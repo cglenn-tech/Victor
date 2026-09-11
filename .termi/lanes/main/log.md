@@ -319,3 +319,96 @@ Any remaining risky or unclear areas
 
 
 The goal is a tighter, more reliable Victor — not a pure rewrite.
+
+### 2026-09-10 23:17 — agent
+Taking a cleanup task and mapping every candidate for deletion first — with careful zero-caller verification before removing anything.`app.py` and `private_engine/` exist and reference things I changed — inspecting before touching anything, since they may be the shipped desktop flow.`private_engine` is a live, test-enforced system (XPC sandbox, llama-only by design) — it still uses `ingest_vision`/`ScreenshotEvidence`, so the evidence path must stay. Verifying the remaining candidates' callers precisely.Verdicts in: app.py runs my new flow; private_engine stays as legacy-safe variant; the web-capture archive, all 5 screenshot routes, and `_has_strong_entity_shift` are confirmed dead. Deleting the dead files first.The `head -20` may have clipped the lib listing — verifying lib's files are intact.lib intact, deletions clean. Now the agent simplification + hardening — main.py first: kill the llama download block, add crash-recovery requeue, and observation-save hardening.main.py now needs the model_client import for the config warning. Adding it, then the database unsynced helpers.Now the database helpers for crash-recovery requeue.Now sync.py: deleting the dead screenshot-upload machinery.Cleaning the now-dead `evidence_paths` variable and unused imports in sync.py.Verifying those imports were truly unused.`_upload_screenshots` itself is still in the file — my edit only removed its call site, and it still references the now-unimported `Path` (a runtime landmine). Deleting the whole function.Now finalizer: removing the llama path and its dead helpers. Checking for leftover dead helpers first.Confirmed: `_local_observations`, `_activity_log`, `_deduplicate`, and the `_EVIDENCE_BASE` constant are all dead. Removing them and the flag branch.Checking those two remaining references aren't dangling.Finalizer clean. Removing the dead `_has_strong_entity_shift` from the engine.Now the vision hardening — bad screenshots drop the batch immediately instead of burning three retrie
+
+### 2026-09-10 23:18 — cglenn
+now give me a rundown how does Victor work for the user and technically as well.
+
+### 2026-09-10 23:19 — agent
+**How Victor works — the user's experience**
+
+1. **Setup once:** install the desktop app, sign in on the website, and the device activates through the browser. Grant screen-recording permission.
+2. **Consent first:** the first time it sees a window, it asks "VICTOR — Allow Observation?" per app/window. Denied or timed-out windows are never captured — they become logged gaps instead. Leases reset if you lock your machine.
+3. **Start work:** click Start on the website. The agent records passively in the background; close the tab or laptop lid — it keeps going. Click Stop to finish.
+4. **Review observations:** everything it understood about your work lands in the **Observation Log** on the website, newest first, grouped by day. Each observation is a screenshot with a title, a substantive description of the work, apps used, entities (cases/clients/projects), and a time range. You can expand, edit the text, approve, or delete anything.
+5. **Daily record:** the log's day grouping *is* your daily work record — edited text supersedes the model's original, deleted items vanish everywhere.
+6. **Weekly report:** pick a date range, generate — you get a professional timesheet: matters, substantive work, time totals, organized by day. Approved observations feed it.
+7. **Privacy posture:** screenshots are temporary (deleted as soon as they're analyzed); the durable record is text. Nothing goes to any third-party AI — the only model is the self-hosted one, and the database on disk is encrypted.
+
+**How it works — technically**
+
+**Web (Next.js 16 + Supabase):** Supabase handles auth, Postgres with row-level security (every user sees only their rows), and Realtime — the browser's Start/Stop signal reaches the agent over a WebSocket without the agent polling. The agent authenticates to the server with a per-device token (hashed in `devices`), never with DB credentials. Pages: episode viewer, Observation Log (`/observations`), reports, files, download.
+
+**Desktop agent (Python):**
+- **C
+
+### 2026-09-10 23:43 — cglenn
+I need a clear list of every environment variable required to run Victor right now (both the desktop agent and the web app).
+
+Please:
+1. List every required environment variable.
+2. Say which file each one belongs in (agent/.env vs .env.local).
+3. Tell me whether I can put all of them in one file or if they must stay separated.
+4. Call out any Supabase-related variables I still need.
+5. Call out the three self-hosted model variables (URL, model name, API key).
+6. Note any variables that are optional vs required.
+
+Keep the answer short and practical — just the list and where each one goes.
+
+### 2026-09-10 23:45 — agent
+Verifying against the actual code before listing — grepping every env read in both sides.One check left — whether the agent reads Supabase creds directly or gets everything from the web API.**`.env.local` (web app — project root)**
+
+| Variable | Required? |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | ✅ |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ (admin client — device auth, writes) |
+| `SUPABASE_JWT_SECRET` | ✅ (signs realtime tokens) |
+| `SELF_HOSTED_MODEL_URL` | ✅ for reports |
+| `SELF_HOSTED_MODEL_NAME` | ✅ for reports |
+| `SELF_HOSTED_API_KEY` | ✅ for reports |
+| `WINDOWS_INSTALLER_URL` / `WINDOWS_INSTALLER_VERSION` | optional (Windows download) |
+| `NEXT_PUBLIC_MIN_AGENT_VERSION` | optional (version gate, default 1.0.0) |
+
+**`agent/.env` (desktop agent)**
+
+| Variable | Required? |
+|---|---|
+| `SELF_HOSTED_MODEL_URL` | ✅ (no observations without it) |
+| `SELF_HOSTED_MODEL_NAME` | ✅ |
+| `SELF_HOSTED_API_KEY` | ✅ |
+| `BUILDHARVEY_BASE_URL` | ✅ in dev (defaults to `https://buildharvey.com`) |
+| `BUILDHARVEY_PRIVATE_MODE`, `ENABLE_CAPTURE_LEASES`, `USE_LOCAL_INFERENCE`, `OBSERVATION_BATCH_SIZE`, `OBSERVATION_FLUSH_IDLE_SECONDS`, `ENABLE_APPLESCRIPT_METADATA`, `CONSENT_DIALOG_TIMEOUT_SECONDS`, `SCREENSHOT_RETENTION_HOURS`, `LOG_LEVEL`, `BUILDHARVEY_DEV` | optional — all have sensible defaults |
+
+**Answers:**
+1–2. Above — the two groups live in **different files and must stay separated**: the agent (Python) only loads `agent/.env`; the web app (Next.js) only reads `.env.local`/`.env`. The three `SELF_HOSTED_*` vars are the exception — both runtimes need them, so **duplicate them in both files**.
+3. Do **not** merge: the agent must never see `SUPABASE_SERVICE_ROLE_KEY` (it authenticates with a device token instead — the README's mention of `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` in agent/.env is stale; nothing reads it).
+4. Supabase vars still needed: the 4 web-side ones above, copied from your Supabase dashboard → Settings → API.
+5. The thre
+
+### 2026-09-11 00:47 — cglenn
+Repo: https://github.com/cglenn-tech/Victor (Next.js 16 App Router + Supabase Auth)
+
+Add a full “forgot password / reset password” flow.
+
+Context:
+- Auth UI is components/AuthForm.tsx (email + password signup/signin).
+- Email verify uses /auth/callback and (on branch fix/prefetch-safe-email-verify / PR #2) /auth/confirm — keep reset links prefetch-safe the same way: do NOT consume OTP tokens on GET; require an explicit user click/POST.
+- Signup already uses emailRedirectTo for /auth/callback.
+- Resend verify exists at app/api/auth/resend/route.ts (rate-limited).
+- Branding: user-facing name is Victor/VICTOR; leave buildharvey://, BUILDHARVEY_* env keys, com.buildharvey.agent alone.
+
+Requirements:
+1. Sign-in UI: “Forgot password?” link that collects email and calls supabase.auth.resetPasswordForEmail(email, { redirectTo: `${origin}/auth/reset` }) (or equivalent).
+2. Rate-limit the request (same spirit as /api/auth/resend).
+3. Prefetch-safe reset landing:
+   - Email link must not auto-consume the recovery token on GET.
+   - Interstitial confirm → then exchange/verify → page to set a new password (supabase.auth.updateUser({ password })).
+4. After success, redirect to signed-in home (or sign-in with success message).
+5. Clear errors for invalid/expired links; don’t leak whether an email exists more than Supabase already does.
+6. Document any Supabase dashboard steps: Site URL, Redirect URLs allow-list for /auth/reset (and confirm path), and Recovery email template (fix “Verfiy”-style typos; subject “Reset your password”).
+7. Open a PR against main with a short test plan.
+
+Out of scope: OAuth, magic-link-only auth, changing product branding IDs.
