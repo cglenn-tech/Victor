@@ -154,10 +154,11 @@ export default function AuthForm() {
     }
   }
 
-  const buttonText = stage === 'creating'
-    ? 'Creating account…'
-    : mode === 'signup'
-    ? 'Continue'
+  const buttonText =
+    stage === 'creating' ? 'Creating account…'
+    : stage === 'sending' ? 'Sending…'
+    : mode === 'forgot' ? 'Send reset link'
+    : mode === 'signup' ? 'Continue'
     : 'Sign in'
 
   return (
