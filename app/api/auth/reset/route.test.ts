@@ -79,7 +79,8 @@ describe('POST /api/auth/reset', () => {
     expect(res.status).toBe(429)
     const keys = vi.mocked(rateLimit).mock.calls.map((c) => c[0])
     expect(keys).toContain('reset-ip:unknown')
-    expect(keys).toContain('reset:a@example.com')
+    // IP-blocked requests never even reach the per-email limiter
+    expect(keys).not.toContain('reset:a@example.com')
   })
 
   it('reads the client IP from x-forwarded-for', async () => {
