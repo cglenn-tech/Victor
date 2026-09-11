@@ -10,12 +10,14 @@ export default async function CallbackErrorPage() {
     redirect(`/verify?email=${encodeURIComponent(user.email)}&expired=true`)
   }
 
-  // No session — can't auto-resend, show minimal recovery
   return (
     <div className="min-h-screen flex items-center justify-center bg-white">
       <div className="max-w-sm px-6 text-center">
-        <p className="text-sm text-neutral-900 mb-4">
-          This verification link has expired or has already been used.
+        <p className="text-sm text-neutral-900 mb-2">
+          This verification link has expired or was already used.
+        </p>
+        <p className="text-sm text-neutral-600 mb-4">
+          If you already clicked it (or an email scanner did), your account may be verified — try signing in.
         </p>
         <Link href="/" className="text-sm text-neutral-900 underline">
           Back to sign in
