@@ -444,3 +444,16 @@ After password change, kill other sessions
 On successful updateUser({ password }), revoke other sessions (signOut({ scope: 'others' }) or project “single session” — pick one and test). Attacker with an old refresh token must be kicked. Keep the current browser signed in and redirect home.
 Password rules are server-side, not just mismatch UI
 Enforce min length (and whatever the project already uses) on the update call. Empty/short/identical-mismatch never reach a success redirect. If HaveIBeenPwned is available in the dashboard, turn it
+
+### 2026-09-11 01:26 — agent
+This is a solid hardening spec — taking it on. Adding the board task, then implementing: server-side exchange gate, per-IP rate limit, server-side password update + other-session revocation, URL scrubbing, and the tests.Now the server-side password completion route with session revocation.Adding the coarser per-IP limiter to the reset request route.Now the client rework — session-aware routing, server exchange for token_hash, distinct PKCE failure message, URL scrubbing.Now the tests — the confirm gate first.Extending the request-route tests with the IP-limiter cases.Running the full suite and build.Two failures in the request-route tests — the per-email test predates the IP limiter and now trips it first. Checking the exact pair.Both are test bugs, not code bugs: the per-email test needs its mock scoped to the email key only, and the IP test assumed a header its helper never sets. Fixing.The IP-429 test asserts the email key was also checked — but the IP block returns early by design. Correcting the assertion to prove exactly that.All 132 green. Cleaning up the redundant feature branch (it's identical to main — it must not linger as a merge path), then closing out.Hardening done on main, no PR, public behavior unchanged ("email is on its way" for every request). All 132 tests pass, build green, pushed.
+
+**Files changed**
+- `app/api/auth/reset/confirm/route.ts` — **new**: POST-only, recovery-locked exchange. `type` must be `recovery`; `email|signup|invite|email_change|magiclink` get 400 before Supabase is ever touched, so no session can be minted from a non-recovery link. Sets session cookies on success only.
+- `app/api/auth/reset/complete/route.ts` — **new**: server-side set-password. Requires a session (401 otherwise), enforces min-length + match before calling Supabase, **surfaces Supabase's real error verbatim** (weak password / HIBP breach rejection — 422), then calls `signOut({ scope: 'others' })` to kill every other session while this browser stays signed in.
+
+### 2026-09-11 01:40 — cglenn
+is the pass reset flow pushed>
+
+### 2026-09-11 01:40 — cglenn
+?*
