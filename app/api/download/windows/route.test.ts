@@ -13,7 +13,7 @@ import { GET, POST } from './route'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const GH_URL = 'https://github.com/cglenn-tech/buildharvey/releases/download/v1.0.1/BuildHarveySetup-1.0.1.exe'
+const GH_URL = 'https://github.com/cglenn-tech/Victor/releases/download/v1.0.1/BuildHarveySetup-1.0.1.exe'
 const GH_VERSION = '1.0.1'
 
 const VALID_RELEASE = {

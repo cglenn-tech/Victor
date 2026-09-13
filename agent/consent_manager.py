@@ -6,7 +6,7 @@ Each window must be individually authorized. Authorization is invalidated at
 every security boundary crossing (lock, logout, restart, crash recovery).
 
 State Machine per window:
-  UNAUTHORIZED          → window encountered; no BuildHarvey decision
+  UNAUTHORIZED          → window encountered; no Victor decision
   PENDING_INDIVIDUAL    → individual consent dialog shown, awaiting user response
   AUTHORIZED            → user allowed; capture proceeds
   DECLINED              → user denied or dialog timed out; capture blocked

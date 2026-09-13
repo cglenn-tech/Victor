@@ -1,5 +1,5 @@
 """
-Supabase Realtime relay for BuildHarvey.
+Supabase Realtime relay for Victor.
 
 Replaces the local WebSocket session_server. Both the browser and the agent
 connect outward to Supabase Realtime on the channel:

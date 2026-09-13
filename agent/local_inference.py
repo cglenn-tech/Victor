@@ -129,7 +129,7 @@ class ModelManager:
         tmp = self._models_dir / (model_name + ".tmp")
 
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "BuildHarvey-ModelManager/1"})
+            req = urllib.request.Request(url, headers={"User-Agent": "Victor-ModelManager/1"})
             with urllib.request.urlopen(req, timeout=300) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0

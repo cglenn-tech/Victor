@@ -1,5 +1,5 @@
 """
-BuildHarvey Windows entry point — headless background daemon.
+Victor Windows entry point — headless background daemon.
 
 All user-facing UI lives on buildharvey.com. This module:
   1. Checks for a stored credential; if missing, opens the browser and polls.
@@ -75,20 +75,20 @@ class WindowsApp:
 def run_self_test() -> int:
     """
     Non-destructive self-test for the packaged application.
-    Writes results to %TEMP%/buildharvey-self-test.log (no console in GUI app).
+    Writes results to %TEMP%/victor-self-test.log (no console in GUI app).
     Returns 0 on pass, 1 on any failure.
     """
     import tempfile as _tempfile
     import sqlite3 as _sqlite3
 
-    log_path = os.path.join(_tempfile.gettempdir(), 'buildharvey-self-test.log')
+    log_path = os.path.join(_tempfile.gettempdir(), 'victor-self-test.log')
     failures: list[str] = []
     lines: list[str] = []
 
     def _log(msg: str) -> None:
         lines.append(msg)
 
-    _log('[self-test] BuildHarvey self-test starting')
+    _log('[self-test] Victor self-test starting')
 
     # 1. Core imports
     try:
@@ -105,14 +105,14 @@ def run_self_test() -> int:
         tmp = os.path.join(_tempfile.gettempdir(), '_bh_ocr_test.png')
         img = Image.new('RGB', (500, 80), color='white')
         draw = ImageDraw.Draw(img)
-        draw.text((10, 25), 'BuildHarvey OCR Test', fill='black')
+        draw.text((10, 25), 'Victor OCR Test', fill='black')
         img.save(tmp)
         result = pytesseract.image_to_string(Image.open(tmp), lang='eng')
         try:
             os.unlink(tmp)
         except Exception:
             pass
-        if 'buildharvey' not in result.lower() and 'ocr' not in result.lower():
+        if 'victor' not in result.lower() and 'ocr' not in result.lower():
             raise RuntimeError(f'unexpected output: {repr(result.strip()[:80])}')
         _log('[self-test] OCR smoke test: PASS')
     except Exception as exc:

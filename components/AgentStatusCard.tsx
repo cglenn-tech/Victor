@@ -52,21 +52,21 @@ function semverLessThan(a: string, b: string): boolean {
   return false
 }
 
-type BuildHarveyPresence = {
+type VictorPresence = {
   type?: 'agent' | 'browser'
   version?: string
 }
 
 function isAgentPresence(value: unknown): boolean {
   if (typeof value !== 'object' || value === null) return false
-  return (value as BuildHarveyPresence).type === 'agent'
+  return (value as VictorPresence).type === 'agent'
 }
 
 function getAgentVersion(presenceState: Record<string, unknown[]>): string | undefined {
   for (const presences of Object.values(presenceState)) {
     for (const p of presences) {
       if (isAgentPresence(p)) {
-        return (p as BuildHarveyPresence).version
+        return (p as VictorPresence).version
       }
     }
   }

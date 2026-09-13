@@ -44,7 +44,7 @@ def main() -> None:
         sys.exit(1)
 
     print("\n" + "=" * 70)
-    print("BuildHarvey Local Model Benchmark Results")
+    print("Victor Local Model Benchmark Results")
     print("=" * 70)
 
     passing = []

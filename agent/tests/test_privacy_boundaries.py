@@ -3,7 +3,7 @@ Privacy boundary tests — Part 14 of the production migration.
 
 Covers:
   1. SQLite encryption verification: an encrypted DB cannot be read by plain sqlite3
-  2. BuildHarvey window exclusion: agent-owned apps never enter the Episode Engine
+  2. Victor window exclusion: agent-owned apps never enter the Episode Engine
      and never trigger consent prompts
   3. Windows capture API selection: capture_window() on Windows routes to
      _capture_window_win32(), never to capture_screen()
@@ -242,7 +242,7 @@ class TestSQLiteEncryptionVerification(unittest.TestCase):
                     _db._connect_encrypted()
 
 
-# ── BuildHarvey window exclusion ──────────────────────────────────────────────
+# ── Victor window exclusion ──────────────────────────────────────────────
 
 class TestBuildharveyWindowExclusion(unittest.TestCase):
     """
@@ -251,19 +251,19 @@ class TestBuildharveyWindowExclusion(unittest.TestCase):
     """
 
     def test_buildharvey_app_not_user_work(self):
-        """is_user_work() must return False for any BuildHarvey-owned app name."""
+        """is_user_work() must return False for any Victor-owned app name."""
         import observer
         bh_apps = [
-            "BuildHarvey",
-            "buildharvey",
-            "BuildHarvey Agent",
+            "Victor",
+            "victor",
+            "Victor Agent",
             "com.buildharvey.agent",
         ]
         for app_name in bh_apps:
             obs = observer.Observation(
                 timestamp="2026-08-13T00:00:00Z",
                 app=app_name,
-                window_title="BuildHarvey Status",
+                window_title="Victor Status",
                 browser_url="",
                 file_path="",
             )
@@ -313,21 +313,21 @@ class TestBuildharveyWindowExclusion(unittest.TestCase):
 
     def test_buildharvey_bundle_excluded_from_consent_flow(self):
         """
-        Even if a BuildHarvey window somehow reaches the consent check,
+        Even if a Victor window somehow reaches the consent check,
         the resulting observation must be filtered by is_user_work() before
         entering the Episode Engine.
 
         This tests the defense-in-depth chain: even if consent_manager.is_authorized()
-        returned True for a BuildHarvey window (which it should not — the agent's own
+        returned True for a Victor window (which it should not — the agent's own
         bundle should not appear as a frontmost productivity window), the
         is_user_work() filter in main._cycle() removes it before the engine sees it.
         """
         import observer
 
-        # Simulate a case where somehow a "BuildHarvey" observation escaped consent
+        # Simulate a case where somehow a "Victor" observation escaped consent
         obs = observer.Observation(
             timestamp="2026-08-13T00:00:00Z",
-            app="BuildHarvey",
+            app="Victor",
             window_title="Weekly Report",
             browser_url="",
             file_path="",

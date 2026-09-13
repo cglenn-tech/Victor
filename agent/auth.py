@@ -1,5 +1,5 @@
 """
-BuildHarvey agent authentication.
+Victor agent authentication.
 
 Device activation flow:
   1. Generate raw_device_token and raw_polling_secret locally.
@@ -73,7 +73,7 @@ def _sha256_hex(data: bytes) -> str:
 
 
 def _api(path: str, body: dict) -> dict:
-    """POST to the BuildHarvey API. Returns parsed JSON response."""
+    """POST to the Victor API. Returns parsed JSON response."""
     url = f"{config.BASE_URL}{path}"
     payload = json.dumps(body).encode()
     req = urllib.request.Request(
@@ -87,7 +87,7 @@ def _api(path: str, body: dict) -> dict:
 
 
 def _api_bearer(path: str, token: str, method: str = 'GET', body: Optional[dict] = None) -> dict:
-    """Authenticated request to the BuildHarvey API using Bearer device token."""
+    """Authenticated request to the Victor API using Bearer device token."""
     url = f"{config.BASE_URL}{path}"
     data = json.dumps(body).encode() if body else None
     headers: dict = {'Authorization': f'Bearer {token}'}

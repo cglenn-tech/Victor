@@ -1,6 +1,6 @@
 # VICTOR
 
-VICTOR (formerly BuildHarvey) is an observation-based desktop agent that captures work sessions, groups them into Episodes, and surfaces them for review in a web application.
+VICTOR (formerly Victor) is an observation-based desktop agent that captures work sessions, groups them into Episodes, and surfaces them for review in a web application.
 
 ## Structure
 

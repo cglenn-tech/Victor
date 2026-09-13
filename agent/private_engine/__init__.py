@@ -1,5 +1,5 @@
 """
-BuildHarvey Private Engine — Phase 7: Network Isolation.
+Victor Private Engine — Phase 7: Network Isolation.
 
 This package implements the private work engine that handles all capture,
 inference, and storage. It is architecturally isolated from all networking.
@@ -15,7 +15,7 @@ This invariant is enforced by:
   4. Windows: architectural convention enforced by code review and tests
 
 On macOS, the full Private Engine runs as BuildHarveyPrivateEngine.xpc with no
-network entitlement. The app shell (BuildHarvey.app) communicates with it via
+network entitlement. The app shell (Victor.app) communicates with it via
 NSXPCConnection carrying only the IPC interface defined in ipc.py.
 
 On Windows, the Private Engine runs as a child process communicating with the

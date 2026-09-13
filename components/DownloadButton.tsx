@@ -154,7 +154,7 @@ export default function DownloadButton({ label }: Props) {
           <p className="mt-2 text-neutral-500 text-xs">
             If your download didn&apos;t start:{' '}
             <a href={state.url} className="underline text-neutral-900">
-              Download BuildHarvey
+              Download Victor
             </a>
           </p>
         </div>
