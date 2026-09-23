@@ -4,14 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version (for example 0.1.0)"
+        description: "Release version (for example 0.1.1)"
         required: true
-        default: "0.1.0"
+        default: "0.1.1"
   push:
     branches:
       - main
     paths:
       - ".github/workflows/build-macos-release.yml"
+      - "agent/**"
     tags:
       - "v*"
 
@@ -49,7 +50,7 @@ jobs:
           elif [[ -n "${{ inputs.version }}" ]]; then
             VERSION="${{ inputs.version }}"
           else
-            VERSION="0.1.0"
+            VERSION="0.1.1"
           fi
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "tag=v${VERSION}" >> "${GITHUB_OUTPUT}"
@@ -74,7 +75,7 @@ jobs:
         run: |
           chmod +x build_macos.sh
           ./build_macos.sh
-          mv "dist/BuildHarvey-${BUILD_VERSION}.dmg" "dist/Victor-${BUILD_VERSION}-mac.dmg"
+          cp "dist/Victor-${BUILD_VERSION}-mac.dmg" "dist/Victor-mac.dmg"
 
       - name: Verify DMG
         working-directory: agent
@@ -82,8 +83,14 @@ jobs:
           BUILD_VERSION: ${{ steps.version.outputs.version }}
         run: |
           test -f "dist/Victor-${BUILD_VERSION}-mac.dmg"
+          test -f "dist/Victor-mac.dmg"
+          test -d "dist/dmg-stage/Victor.app"
+          test -L "dist/dmg-stage/Applications"
+          test -x "dist/Victor.app/Contents/MacOS/Victor"
+          test "$(plutil -extract CFBundleName raw "dist/Victor.app/Contents/Info.plist")" = "Victor"
+          test "$(plutil -extract CFBundleDisplayName raw "dist/Victor.app/Contents/Info.plist")" = "Victor"
           hdiutil imageinfo "dist/Victor-${BUILD_VERSION}-mac.dmg" >/dev/null
-          ls -lh "dist/Victor-${BUILD_VERSION}-mac.dmg"
+          ls -lh "dist/Victor-${BUILD_VERSION}-mac.dmg" "dist/Victor-mac.dmg"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -103,8 +110,8 @@ jobs:
 
           ### Install
           1. Download the `.dmg` below.
-          2. Open it and move the app to Applications.
-          3. Try to open Victor.
+          2. Open it and drag **Victor** onto the **Applications** shortcut.
+          3. Open Applications and double-click **Victor**. Victor will open the web sign-in/connection flow in your browser.
           4. Because this beta is not notarized with an Apple Developer ID, macOS may block the first launch.
           5. If blocked, open **System Settings → Privacy & Security**, scroll to **Security**, and choose **Open Anyway**, then confirm **Open**.
 
@@ -112,8 +119,16 @@ jobs:
           EOF
 
           if gh release view "${TAG}" >/dev/null 2>&1; then
-            gh release upload "${TAG}" "agent/dist/Victor-${VERSION}-mac.dmg" --clobber
+            gh release upload "${TAG}" \
+              "agent/dist/Victor-${VERSION}-mac.dmg" \
+              "agent/dist/Victor-mac.dmg" \
+              --clobber
             gh release edit "${TAG}" --title "Victor ${VERSION} — Early Mac Beta" --notes-file /tmp/release-notes.md
           else
-            gh release create "${TAG}"               "agent/dist/Victor-${VERSION}-mac.dmg"               --target "${GITHUB_SHA}"               --title "Victor ${VERSION} — Early Mac Beta"               --notes-file /tmp/release-notes.md
+            gh release create "${TAG}" \
+              "agent/dist/Victor-${VERSION}-mac.dmg" \
+              "agent/dist/Victor-mac.dmg" \
+              --target "${GITHUB_SHA}" \
+              --title "Victor ${VERSION} — Early Mac Beta" \
+              --notes-file /tmp/release-notes.md
           fi
