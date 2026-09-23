@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { getBrowserClient } from '@/lib/supabase-browser'
 
 type Mode = 'signup' | 'signin' | 'forgot'
@@ -9,7 +9,10 @@ type Stage = 'idle' | 'creating' | 'sending' | 'sent'
 
 export default function AuthForm() {
   const router = useRouter()
-  const [mode, setMode] = useState<Mode>('signup')
+  const searchParams = useSearchParams()
+  const activationId = searchParams.get('activate')
+  const activationTarget = activationId ? `/activate?id=${encodeURIComponent(activationId)}` : '/'
+  const [mode, setMode] = useState<Mode>(activationId ? 'signin' : 'signup')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -65,7 +68,7 @@ export default function AuthForm() {
         const { data, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+          options: { emailRedirectTo: `${window.location.origin}/auth/callback${activationId ? `?activate=${encodeURIComponent(activationId)}` : ''}` },
         })
 
         console.log('[signup] supabase responded', { elapsed: Date.now() - t0, error: signUpError?.message })
@@ -95,7 +98,15 @@ export default function AuthForm() {
             const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
             if (!signInError) {
               console.log('[signup] auto sign-in succeeded, already verified')
-              router.refresh()
+              if (activationId) {
+                router.push(activationTarget)
+              } else {
+                if (activationId) {
+          router.push(activationTarget)
+        } else {
+          router.refresh()
+        }
+              }
               return
             }
             if (signInError.message.toLowerCase().includes('email not confirmed')) {
@@ -106,7 +117,7 @@ export default function AuthForm() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email }),
               }).catch(() => {})
-              router.push(`/verify?email=${encodeURIComponent(email)}`)
+              router.push(`/verify?email=${encodeURIComponent(email)}${activationId ? `&activate=${encodeURIComponent(activationId)}` : ''}`)
               return
             }
             // Wrong password or other sign-in error — account exists, can't auto-recover
@@ -129,7 +140,7 @@ export default function AuthForm() {
 
         if (data.user) {
           console.log('[signup] navigating to verify', { email })
-          router.push(`/verify?email=${encodeURIComponent(email)}`)
+          router.push(`/verify?email=${encodeURIComponent(email)}${activationId ? `&activate=${encodeURIComponent(activationId)}` : ''}`)
         }
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({
