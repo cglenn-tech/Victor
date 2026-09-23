@@ -40,7 +40,7 @@ const DOT_COLORS: Record<CardState, string> = {
   error:           'bg-red-400',
 }
 
-const MIN_VERSION = process.env.NEXT_PUBLIC_MIN_AGENT_VERSION ?? '1.0.0'
+const MIN_VERSION = process.env.NEXT_PUBLIC_MIN_AGENT_VERSION ?? '0.1.0'
 
 function semverLessThan(a: string, b: string): boolean {
   const pa = a.split('.').map(Number)
@@ -216,7 +216,7 @@ export default function AgentStatusCard({ deviceId }: Props) {
         <p className="text-sm font-medium text-neutral-500">Previously connected, but currently offline.</p>
         <div className="flex flex-col gap-2 mt-3">
           <button
-            onClick={() => { window.location.href = 'buildharvey://open' }}
+            onClick={() => { window.location.href = 'victor://open' }}
             className="text-sm font-medium bg-neutral-900 text-white px-4 py-2 rounded
                        hover:bg-neutral-700 transition-colors"
           >

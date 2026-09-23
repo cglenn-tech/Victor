@@ -200,19 +200,21 @@ class AppDelegate(AppKit.NSObject):
                 return
             auth.store_credential(token)
 
-        # 2. Check screen recording permission
+        # 2. Check screen recording permission (prompt if needed), but still
+        # start the agent so the website can detect presence and leave the
+        # download loop. Capture stays blocked until permission is granted.
         status = permissions.check()
         if status != 'GRANTED':
             AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(
                 self._prompt_permissions
             )
-            return
 
         self.startAgent()
 
     def connectAccount_(self, sender):
-        """Re-trigger activation if no credential is stored (e.g. after timeout)."""
+        """Open dashboard if already signed in; otherwise start activation/sign-in."""
         if auth.read_credential():
+            open_url(config.BASE_URL)
             return
         threading.Thread(target=self._startup, daemon=True).start()
 

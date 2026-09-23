@@ -17,6 +17,18 @@ export default async function DownloadPage() {
     redirect(`/verify?email=${encodeURIComponent(user.email ?? '')}`)
   }
 
+  // If this account already has a linked desktop device, leave the download
+  // loop and go to the dashboard. DownloadFocusRecheck relies on this.
+  const { data: devices } = await supabase
+    .from('devices')
+    .select('id')
+    .is('revoked_at', null)
+    .limit(1)
+
+  if (devices && devices.length > 0) {
+    redirect('/')
+  }
+
   return (
     <main className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm space-y-6">
