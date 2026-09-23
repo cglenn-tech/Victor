@@ -123,18 +123,22 @@ def activate(device_name: str = 'My Mac', platform: str = 'macos') -> Optional[s
         })
     except Exception as exc:
         print(f"[auth] activate request failed: {exc}")
+        from browser_open import open_url
+        open_url(config.BASE_URL)
         return None
 
     activation_id = resp.get('activation_id')
     if not activation_id:
         print("[auth] no activation_id in response")
+        from browser_open import open_url
+        open_url(config.BASE_URL)
         return None
 
-    # Step 3: Open browser (cross-platform)
+    # Step 3: Open browser (cross-platform). Use browser_open so frozen
+    # Mac/Windows builds actually surface the sign-in / activate page.
     activate_url = f"{config.BASE_URL}/?activate={activation_id}"
-    import webbrowser
-    webbrowser.open(activate_url)
-    print(f"[auth] opened browser: {activate_url}")
+    from browser_open import open_url
+    open_url(activate_url)
 
     # Step 4: Poll for approval
     raw_polling_secret_hex = raw_polling_secret.hex()

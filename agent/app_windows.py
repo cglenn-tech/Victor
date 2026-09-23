@@ -28,8 +28,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import auth
+import config
 import realtime_client
 import main
+from browser_open import open_url
 
 
 class WindowsApp:
@@ -44,7 +46,10 @@ class WindowsApp:
         except Exception as exc:
             print(f'[app_windows] session monitor unavailable: {exc}')
 
-        if not auth.read_credential():
+        if auth.read_credential():
+            # Already signed in — open dashboard, not the auth form.
+            open_url(config.BASE_URL)
+        else:
             import platform as _platform
             device_name = _platform.node() or 'My PC'
             print(f"[app] No credential — activating device '{device_name}'")

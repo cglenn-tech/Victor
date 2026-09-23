@@ -15,7 +15,8 @@ Menu bar icon:
   🟢  recording
 """
 import threading
-import webbrowser
+import config
+from browser_open import open_url
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -119,16 +120,15 @@ class AppDelegate(AppKit.NSObject):
         )
 
         # ── Credential and permission check, then start ────────────────────────
-        # If this Mac is already connected, opening Victor should still surface
-        # the web app immediately. A brand-new install opens the browser from
-        # auth.activate() once its activation URL has been created.
+        # Already signed in (device credential): open the web app/dashboard.
+        # First-time install: auth.activate() opens the sign-in / activate URL.
         if auth.read_credential():
-            webbrowser.open(config.BASE_URL)
+            open_url(config.BASE_URL)
 
         threading.Thread(target=self._startup, daemon=True).start()
 
     def openDashboard_(self, sender):
-        webbrowser.open(config.BASE_URL)
+        open_url(config.BASE_URL)
 
     def workspaceSleep_(self, notification):
         self._on_security_boundary("device_locked")
