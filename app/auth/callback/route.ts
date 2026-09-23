@@ -3,10 +3,11 @@ import type { NextRequest } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { getAdminClient } from '@/lib/supabase-admin'
 
-function confirmUrl(request: NextRequest, token_hash: string, type: string) {
+function confirmUrl(request: NextRequest, token_hash: string, type: string, activate?: string | null) {
   const url = new URL('/auth/confirm', request.url)
   url.searchParams.set('token_hash', token_hash)
   url.searchParams.set('type', type)
+  if (activate) url.searchParams.set('activate', activate)
   return url
 }
 
@@ -14,7 +15,7 @@ function errorRedirect(request: NextRequest, reason: string) {
   return NextResponse.redirect(new URL(`/auth/callback/error?reason=${reason}`, request.url))
 }
 
-async function verifyAndRedirect(request: NextRequest, token_hash: string, type: string) {
+async function verifyAndRedirect(request: NextRequest, token_hash: string, type: string, activate?: string | null) {
   const t0 = Date.now()
   console.log('[verify] OTP attempt', { type, has_token_hash: !!token_hash, t: t0 })
 
@@ -23,7 +24,8 @@ async function verifyAndRedirect(request: NextRequest, token_hash: string, type:
     return errorRedirect(request, 'invalid')
   }
 
-  const response = NextResponse.redirect(new URL('/', request.url))
+  const destination = activate ? `/activate?id=${encodeURIComponent(activate)}` : '/'
+  const response = NextResponse.redirect(new URL(destination, request.url))
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -72,6 +74,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const token_hash = searchParams.get('token_hash')
   const type = searchParams.get('type')
+  const activate = searchParams.get('activate')
 
   console.log('[verify] callback GET (no consume)', { type, has_token_hash: !!token_hash })
 
@@ -79,19 +82,21 @@ export async function GET(request: NextRequest) {
     return errorRedirect(request, 'invalid')
   }
 
-  return NextResponse.redirect(confirmUrl(request, token_hash, type))
+  return NextResponse.redirect(confirmUrl(request, token_hash, type, activate))
 }
 
 export async function POST(request: NextRequest) {
   const contentType = request.headers.get('content-type') ?? ''
   let token_hash: string | null = null
   let type: string | null = null
+  let activate: string | null = null
 
   if (contentType.includes('application/json')) {
     try {
       const body = await request.json()
       token_hash = typeof body.token_hash === 'string' ? body.token_hash : null
       type = typeof body.type === 'string' ? body.type : null
+      activate = typeof body.activate === 'string' ? body.activate : null
     } catch {
       return errorRedirect(request, 'invalid')
     }
@@ -99,13 +104,15 @@ export async function POST(request: NextRequest) {
     const form = await request.formData()
     const th = form.get('token_hash')
     const ty = form.get('type')
+    const ac = form.get('activate')
     token_hash = typeof th === 'string' ? th : null
     type = typeof ty === 'string' ? ty : null
+    activate = typeof ac === 'string' ? ac : null
   }
 
   if (!token_hash || !type) {
     return errorRedirect(request, 'invalid')
   }
 
-  return verifyAndRedirect(request, token_hash, type)
+  return verifyAndRedirect(request, token_hash, type, activate)
 }
