@@ -144,9 +144,9 @@ export default function DownloadButton({ label }: Props) {
             </>
           ) : (
             <>
-              <p>Open the DMG, drag VICTOR to Applications.</p>
+              <p>Open the DMG, drag Victor to Applications, then double-click Victor in Applications.</p>
               <p className="text-neutral-500 text-xs mt-1">
-                On first open: right-click VICTOR → <strong>Open</strong> →{' '}
+                On first open, if macOS blocks it: right-click Victor → <strong>Open</strong> →{' '}
                 <strong>Open</strong> to bypass Gatekeeper.
               </p>
             </>
@@ -154,7 +154,7 @@ export default function DownloadButton({ label }: Props) {
           <p className="mt-2 text-neutral-500 text-xs">
             If your download didn&apos;t start:{' '}
             <a href={state.url} className="underline text-neutral-900">
-              Download BuildHarvey
+              Download Victor
             </a>
           </p>
         </div>
