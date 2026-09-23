@@ -1,11 +1,11 @@
 import Link from 'next/link'
 
 interface Props {
-  searchParams: Promise<{ token_hash?: string; type?: string }>
+  searchParams: Promise<{ token_hash?: string; type?: string; activate?: string }>
 }
 
 export default async function ConfirmEmailPage({ searchParams }: Props) {
-  const { token_hash, type } = await searchParams
+  const { token_hash, type, activate } = await searchParams
 
   if (!token_hash || !type || (type !== 'email' && type !== 'signup')) {
     return (
@@ -32,6 +32,7 @@ export default async function ConfirmEmailPage({ searchParams }: Props) {
         <form method="POST" action="/auth/callback">
           <input type="hidden" name="token_hash" value={token_hash} />
           <input type="hidden" name="type" value={type} />
+          {activate && <input type="hidden" name="activate" value={activate} />}
           <button
             type="submit"
             className="w-full bg-neutral-900 text-white rounded px-3 py-2 text-sm font-medium"
