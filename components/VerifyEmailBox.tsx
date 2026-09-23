@@ -9,10 +9,12 @@ type ResendState = 'idle' | 'sending' | 'sent' | 'error'
 interface Props {
   email: string
   expired?: boolean
+  activate?: string
 }
 
-export default function VerifyEmailBox({ email, expired }: Props) {
+export default function VerifyEmailBox({ email, expired, activate }: Props) {
   const router = useRouter()
+  const nextTarget = activate ? `/activate?id=${encodeURIComponent(activate)}` : '/'
   const [resendState, setResendState] = useState<ResendState>('idle')
   const [resendError, setResendError] = useState('')
   const [showSlowWarning, setShowSlowWarning] = useState(false)
@@ -30,11 +32,11 @@ export default function VerifyEmailBox({ email, expired }: Props) {
       const { data: { user } } = await supabase.auth.getUser()
       if (user?.email_confirmed_at) {
         console.log('[verify] verified detected, redirecting')
-        router.push('/')
+        router.push(nextTarget)
       }
     }, 3000)
     return () => clearInterval(interval)
-  }, [router])
+  }, [router, nextTarget])
 
   async function handleResend() {
     if (resendState === 'sending') return
