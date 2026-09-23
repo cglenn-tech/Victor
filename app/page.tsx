@@ -8,7 +8,13 @@ import AppNav from '@/components/AppNav'
 
 export const dynamic = 'force-dynamic'
 
-export default async function Home() {
+interface HomeProps {
+  searchParams: Promise<{ activate?: string | string[] }>
+}
+
+export default async function Home({ searchParams }: HomeProps) {
+  const params = await searchParams
+  const activateParam = Array.isArray(params.activate) ? params.activate[0] : params.activate
   const supabase = await getServerClient()
   const { data: { user } } = await supabase.auth.getUser()
 
@@ -17,9 +23,17 @@ export default async function Home() {
     return <AuthForm />
   }
 
-  // Session but email not confirmed → redirect to verify
+  // Session but email not confirmed → redirect to verify while preserving
+  // a pending desktop activation.
   if (!user.email_confirmed_at) {
-    redirect(`/verify?email=${encodeURIComponent(user.email ?? '')}`)
+    const activateQuery = activateParam ? `&activate=${encodeURIComponent(activateParam)}` : ''
+    redirect(`/verify?email=${encodeURIComponent(user.email ?? '')}${activateQuery}`)
+  }
+
+  // A desktop launch with no stored credential lands on /?activate=<id>.
+  // After sign-in, continue directly to device approval.
+  if (activateParam) {
+    redirect(`/activate?id=${encodeURIComponent(activateParam)}`)
   }
 
   const admin = getAdminClient()
