@@ -1,5 +1,5 @@
 """
-BuildHarvey agent authentication.
+Victor agent authentication.
 
 Device activation flow:
   1. Generate raw_device_token and raw_polling_secret locally.
@@ -73,7 +73,7 @@ def _sha256_hex(data: bytes) -> str:
 
 
 def _api(path: str, body: dict) -> dict:
-    """POST to the BuildHarvey API. Returns parsed JSON response."""
+    """POST to the Victor API. Returns parsed JSON response."""
     url = f"{config.BASE_URL}{path}"
     payload = json.dumps(body).encode()
     req = urllib.request.Request(
@@ -131,7 +131,7 @@ def activate(device_name: str = 'My Mac', platform: str = 'macos') -> Optional[s
         return None
 
     # Step 3: Open browser (cross-platform)
-    activate_url = f"{config.BASE_URL}/activate?id={activation_id}"
+    activate_url = f"{config.BASE_URL}/?activate={activation_id}"
     import webbrowser
     webbrowser.open(activate_url)
     print(f"[auth] opened browser: {activate_url}")
