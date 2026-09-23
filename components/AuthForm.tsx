@@ -101,11 +101,7 @@ export default function AuthForm() {
               if (activationId) {
                 router.push(activationTarget)
               } else {
-                if (activationId) {
-          router.push(activationTarget)
-        } else {
-          router.refresh()
-        }
+                router.refresh()
               }
               return
             }
@@ -150,14 +146,18 @@ export default function AuthForm() {
 
         if (signInError) {
           if (signInError.message.toLowerCase().includes('email not confirmed')) {
-            router.push(`/verify?email=${encodeURIComponent(email)}`)
+            router.push(`/verify?email=${encodeURIComponent(email)}${activationId ? `&activate=${encodeURIComponent(activationId)}` : ''}`)
             return
           }
           setError('Invalid login credentials')
           return
         }
 
-        router.refresh()
+        if (activationId) {
+          router.push(activationTarget)
+        } else {
+          router.refresh()
+        }
       }
     } finally {
       setStage('idle')
