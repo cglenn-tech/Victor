@@ -1,8 +1,8 @@
 """
-BuildHarvey macOS app entry point — headless tray daemon.
+Victor macOS app entry point — headless tray daemon.
 
 Runs as a menu-bar (tray) app with no Dock icon and no GUI window.
-All user-facing UI lives on buildharvey.com.
+All user-facing UI lives on the Victor web app.
 
 Startup flow:
   1. If no credential stored → call auth.activate() to register device and poll for approval.
@@ -43,7 +43,7 @@ class AppDelegate(AppKit.NSObject):
         # No Dock icon — pure menu-bar accessory
         AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
 
-        # Register URL scheme handler for buildharvey:// deep links
+        # Register URL scheme handler for victor:// deep links (legacy buildharvey:// also supported)
         em = AppKit.NSAppleEventManager.sharedAppleEventManager()
         em.setEventHandler_andSelector_forEventClass_andEventID_(
             self,
@@ -64,7 +64,7 @@ class AppDelegate(AppKit.NSObject):
         menu = AppKit.NSMenu.alloc().init()
 
         self._label_item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "BuildHarvey: Idle", None, ""
+            "Victor: Idle", None, ""
         )
         menu.addItem_(self._label_item)
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
@@ -90,7 +90,7 @@ class AppDelegate(AppKit.NSObject):
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
 
         quit_item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Quit BuildHarvey", "terminate:", ""
+            "Quit Victor", "terminate:", ""
         )
         menu.addItem_(quit_item)
 
@@ -119,10 +119,16 @@ class AppDelegate(AppKit.NSObject):
         )
 
         # ── Credential and permission check, then start ────────────────────────
+        # If this Mac is already connected, opening Victor should still surface
+        # the web app immediately. A brand-new install opens the browser from
+        # auth.activate() once its activation URL has been created.
+        if auth.read_credential():
+            webbrowser.open(config.BASE_URL)
+
         threading.Thread(target=self._startup, daemon=True).start()
 
     def openDashboard_(self, sender):
-        webbrowser.open("https://buildharvey.com")
+        webbrowser.open(config.BASE_URL)
 
     def workspaceSleep_(self, notification):
         self._on_security_boundary("device_locked")
@@ -182,14 +188,14 @@ class AppDelegate(AppKit.NSObject):
         if not auth.read_credential():
             device_name = self._get_display_name()
             AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(
-                lambda: self._label_item.setTitle_("BuildHarvey: Connecting…")
+                lambda: self._label_item.setTitle_("Victor: Connecting…")
             )
             print(f"[app] No credential — activating device '{device_name}'")
             token = auth.activate(device_name=device_name)
             if not token:
                 print("[app] Activation failed or timed out")
                 AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(
-                    lambda: self._label_item.setTitle_("BuildHarvey: Not connected")
+                    lambda: self._label_item.setTitle_("Victor: Not connected")
                 )
                 return
             auth.store_credential(token)
@@ -215,7 +221,7 @@ class AppDelegate(AppKit.NSObject):
         realtime_client.force_stop()
         auth.disconnect()
         AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(
-            lambda: self._label_item.setTitle_("BuildHarvey: Disconnected")
+            lambda: self._label_item.setTitle_("Victor: Disconnected")
         )
 
     def handleGetURL_withReplyEvent_(self, event, replyEvent):
@@ -227,18 +233,19 @@ class AppDelegate(AppKit.NSObject):
         if not url_str:
             return
         print(f"[app] URL event: {url_str}")
-        if url_str.startswith('buildharvey://disconnect'):
+        normalized = url_str.replace('buildharvey://', 'victor://', 1)
+        if normalized.startswith('victor://disconnect'):
             threading.Thread(target=self.disconnectAccount_, args=(None,), daemon=True).start()
-        elif url_str.startswith('buildharvey://reconnect'):
+        elif normalized.startswith('victor://reconnect'):
             auth.delete_credential()
             threading.Thread(target=self._startup, daemon=True).start()
-        # buildharvey://open — no action needed; macOS already foregrounded the app
+        # victor://open — no action needed; macOS already foregrounded the app
 
     def _prompt_permissions(self):
         alert = AppKit.NSAlert.alloc().init()
         alert.setMessageText_("Screen Recording Required")
         alert.setInformativeText_(
-            "BuildHarvey needs Screen Recording permission to capture your work. "
+            "Victor needs Screen Recording permission to capture your work. "
             "Click OK to open System Settings."
         )
         alert.addButtonWithTitle_("OK")
@@ -263,10 +270,10 @@ class AppDelegate(AppKit.NSObject):
         def update():
             if state == 'recording':
                 self._status_item.button().setTitle_("🟢")
-                self._label_item.setTitle_("BuildHarvey: Recording")
+                self._label_item.setTitle_("Victor: Recording")
             else:
                 self._status_item.button().setTitle_("⬛")
-                self._label_item.setTitle_("BuildHarvey: Idle")
+                self._label_item.setTitle_("Victor: Idle")
 
         AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(update)
 
