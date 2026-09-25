@@ -1,7 +1,15 @@
 -- Forward-only upgrade for an existing installation with episodes and devices.
--- Repairs missing observation migrations 018/019 without resetting any tables.
+-- Repairs missing episode ownership, observations, and weekly reports without table resets.
 -- Safe to rerun: preserves existing work, edits, approvals and ownership.
 BEGIN;
+
+-- The deployed schema may have device accounts but pre-account episodes.
+-- Preserve unowned historical rows without assigning them to an arbitrary user.
+ALTER TABLE public.episodes
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id),
+  ADD COLUMN IF NOT EXISTS device_id UUID REFERENCES public.devices(id),
+  ADD COLUMN IF NOT EXISTS is_reportable BOOLEAN NOT NULL DEFAULT true;
+CREATE INDEX IF NOT EXISTS episodes_user_idx ON public.episodes (user_id, started_at DESC);
 
 -- Some installations skipped 018/019 (their migration numbers were duplicated).
 -- Create the original table before adding its structured fields.
@@ -53,8 +61,55 @@ ALTER TABLE public.devices
   ADD COLUMN IF NOT EXISTS recording_requested BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS browser_seen_at TIMESTAMPTZ;
 
+-- Reports are absent from some existing deployments (008/011 never applied).
+CREATE TABLE IF NOT EXISTS public.weekly_reports (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  week_start DATE NOT NULL,
+  week_end DATE NOT NULL,
+  content TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE public.weekly_reports
+  ADD COLUMN IF NOT EXISTS period_start DATE,
+  ADD COLUMN IF NOT EXISTS period_end DATE,
+  ADD COLUMN IF NOT EXISTS period_label TEXT,
+  ADD COLUMN IF NOT EXISTS source_episode_ids JSONB DEFAULT '[]',
+  ADD COLUMN IF NOT EXISTS summary_json JSONB;
+UPDATE public.weekly_reports SET period_start = week_start WHERE period_start IS NULL;
+UPDATE public.weekly_reports SET period_end = week_end WHERE period_end IS NULL;
+CREATE INDEX IF NOT EXISTS weekly_reports_user_week_idx ON public.weekly_reports (user_id, week_start DESC);
+CREATE INDEX IF NOT EXISTS weekly_reports_period_idx ON public.weekly_reports (user_id, period_start, period_end);
+ALTER TABLE public.weekly_reports ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "users manage own reports" ON public.weekly_reports;
+CREATE POLICY "users manage own reports" ON public.weekly_reports
+  FOR ALL TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "victor report ownership" ON public.weekly_reports;
+CREATE POLICY "victor report ownership" ON public.weekly_reports AS RESTRICTIVE
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.weekly_reports TO authenticated;
+GRANT ALL ON public.weekly_reports TO service_role;
+
 -- Tombstones keep retries from recreating records a lawyer removed.
 ALTER TABLE public.episodes ENABLE ROW LEVEL SECURITY;
+-- Remove the legacy open policies from early episode-only installations.
+DROP POLICY IF EXISTS "Allow public read" ON public.episodes;
+DROP POLICY IF EXISTS "Allow public delete" ON public.episodes;
+DROP POLICY IF EXISTS "Allow anon select" ON public.episodes;
+DROP POLICY IF EXISTS "Allow anon delete" ON public.episodes;
+DROP POLICY IF EXISTS "anon_select" ON public.episodes;
+DROP POLICY IF EXISTS "anon_delete" ON public.episodes;
+-- Also constrain any differently named permissive policies left in a deployment.
+DROP POLICY IF EXISTS "victor episode ownership" ON public.episodes;
+CREATE POLICY "victor episode ownership" ON public.episodes AS RESTRICTIVE
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "victor episode visibility" ON public.episodes;
+CREATE POLICY "victor episode visibility" ON public.episodes AS RESTRICTIVE
+  FOR SELECT USING (deleted_at IS NULL);
+GRANT SELECT ON public.episodes TO authenticated;
+GRANT ALL ON public.episodes TO service_role;
 DROP POLICY IF EXISTS "users read own episodes" ON public.episodes;
 CREATE POLICY "users read own episodes" ON public.episodes
   FOR SELECT USING (auth.uid() = user_id AND deleted_at IS NULL);
@@ -70,6 +125,12 @@ CREATE POLICY "users update own observations" ON public.observations
 DROP POLICY IF EXISTS "users delete own observations" ON public.observations;
 CREATE POLICY "users delete own observations" ON public.observations
   FOR DELETE USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "victor observation ownership" ON public.observations;
+CREATE POLICY "victor observation ownership" ON public.observations AS RESTRICTIVE
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "victor observation visibility" ON public.observations;
+CREATE POLICY "victor observation visibility" ON public.observations AS RESTRICTIVE
+  FOR SELECT USING (deleted_at IS NULL);
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.observations TO authenticated;
 GRANT ALL ON public.observations TO service_role;
 
@@ -164,4 +225,5 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.merge_work_episodes(UUID, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.merge_work_episodes(UUID, TEXT, TEXT) TO service_role;
+NOTIFY pgrst, 'reload schema';
 COMMIT;
