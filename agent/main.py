@@ -68,6 +68,15 @@ def _establish_session(owner, token, stop_event, state_callback=None) -> bool:
         try:
             result = auth._api_bearer('/api/device/heartbeat', token, method='POST')
             if result.get('ok') is True:
+                server_owner = result.get('user_id')
+                if not server_owner or (owner and owner != server_owner) or auth.read_credential() != token:
+                    if state_callback:
+                        state_callback('reconnect_required')
+                    return False
+                if not owner:
+                    auth.store_user_id(server_owner)
+                if result.get('device_id'):
+                    auth.store_device_id(result['device_id'])
                 return True
         except urllib.error.HTTPError as exc:
             if exc.code in (401, 403):
@@ -90,13 +99,16 @@ def main(
 ) -> None:
     stop_event = stop_event or threading.Event()
     owner, token = auth.read_user_id(), auth.read_credential()
-    if not owner or not token:
+    if not token:
+        if state_callback:
+            state_callback('reconnect_required')
         return
     realtime_client.force_stop()
     realtime_client.set_status('connecting')
-    realtime_client.start()
     if not _establish_session(owner, token, stop_event, state_callback):
         return
+    owner = auth.read_user_id()
+    realtime_client.start()
     model_client.bind_session(owner, token, stop_event)
     try:
         database.purge_stale_temp_frames()

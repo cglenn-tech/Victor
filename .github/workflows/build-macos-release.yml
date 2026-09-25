@@ -10,7 +10,7 @@ on:
       version:
         description: "Release version (for example 0.1.1)"
         required: true
-        default: "1.1.0"
+        default: "1.1.1"
   push:
     branches:
       - main
@@ -45,6 +45,9 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Verify desktop connection with the installed Realtime SDK
+        run: python -m unittest discover -s agent/tests -p test_realtime_connection.py -v
+
       - name: Resolve version
         id: version
         shell: bash
@@ -54,7 +57,7 @@ jobs:
           elif [[ -n "${{ inputs.version }}" ]]; then
             VERSION="${{ inputs.version }}"
           else
-            VERSION="1.1.0"
+            VERSION="1.1.1"
           fi
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "tag=v${VERSION}" >> "${GITHUB_OUTPUT}"
