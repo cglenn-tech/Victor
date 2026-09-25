@@ -47,6 +47,7 @@ class EpisodeEngine:
 
         # Current activity identity (from the latest structured observation)
         self._current_activity_type: str = ""
+        self._current_matter: str = ""
         self._current_applications: list[str] = []
 
         # Observation held while awaiting 2-signal confirmation of a switch
@@ -57,52 +58,31 @@ class EpisodeEngine:
     def ingest_observation(
         self, so: StructuredObservation
     ) -> Optional[EngineResult]:
-        """
-        Process a completed structured observation (model output for a
-        ~5-screenshot batch). Episodes are grouped around these:
-          - same activity_type or application overlap → continue current episode
-          - different activity and no overlap → 2-signal hysteresis switch
+        """Only a matching explicit matter can extend an episode.
 
-        Returns EngineResult (with optional closed_episode) or None.
+        Unknown work stays separate for review. App/type overlap is never proof
+        that two observations concern the same client. No deferred assignment:
+        the returned episode owns this observation immediately.
         """
-        if self._state == "idle":
+        if not self.active:
             return self._open_episode_from_observation(so)
-
         if self._same_activity(so):
-            # A differing observation that never confirmed snaps back here
-            if self._state == "transitioning":
-                self._state = "active"
-                self._consecutive_new_episode = 0
-                self._candidate_name = ""
-            if self._pending_observation is not None:
-                self.active.add_structured_observation(self._pending_observation)
-                self._pending_observation = None
             self._attach(so)
             return EngineResult(active_episode=self.active)
-
-        # Different activity — 2-signal hysteresis
-        if self._state == "transitioning":
-            # Second consecutive differing observation → confirmed switch
-            return self._close_and_open_from_observation(so)
-
-        self._state = "transitioning"
-        self._consecutive_new_episode = 1
-        self._candidate_name = so.title
-        self._pending_observation = so
-        log.info("engine.transitioning", candidate=so.title, current=self.active.case_name)
-        return EngineResult(active_episode=self.active)
+        closed = self.active
+        closed.close(at=max(closed.started_at, so.start_time))
+        self.active = None
+        self._state = "idle"
+        result = self._open_episode_from_observation(so)
+        result.closed_episode = closed
+        return result
 
     def _same_activity(self, so: StructuredObservation) -> bool:
-        """True when the observation clearly belongs to the current episode."""
-        if so.activity_type and so.activity_type == self._current_activity_type:
-            return True
-        if self._current_applications and so.applications:
-            overlap = {a.lower() for a in so.applications} & {
-                a.lower() for a in self._current_applications
-            }
-            if overlap:
-                return True
-        return False
+        def normalized(value):
+            return " ".join(value.casefold().split())
+        return bool(so.matter and self._current_matter and
+                    normalized(so.matter) == normalized(self._current_matter) and
+                    (so.activity_type == "administrative") == (self._current_activity_type == "administrative"))
 
     def _attach(self, so: StructuredObservation) -> None:
         """Attach an observation to the active episode and update activity identity."""
@@ -118,7 +98,10 @@ class EpisodeEngine:
     def _open_episode_from_observation(
         self, so: StructuredObservation, name: Optional[str] = None
     ) -> EngineResult:
-        ep = new_episode(name or so.title or "Untitled work", issue_worked_on=None, work_type="project")
+        ep = new_episode(so.matter or name or f"Unassigned: {so.title or 'work'}", issue_worked_on=None,
+                         work_type="administrative" if so.activity_type == "administrative" else "project")
+        ep.started_at = so.start_time
+        self._current_matter = so.matter
         self.active = ep
         self._state = "active"
         self._consecutive_new_episode = 0
@@ -204,9 +187,8 @@ class EpisodeEngine:
             self.active.add_raw_observation(obs)
 
     def ingest_metadata_activity_only(self) -> None:
-        """Update last_user_activity_at when observe() returns None (no screen change)."""
-        if self.active:
-            self.active.last_user_activity_at = time.time()
+        """An unchanged screen is not evidence of new activity."""
+        pass
 
     def get_context(self) -> dict:
         """Return current episode context for the vision prompt."""
@@ -257,7 +239,7 @@ class EpisodeEngine:
 
         # Pause after 5 min idle (episode stays open)
         if idle > config.INACTIVITY_PAUSE_SECONDS and not self.active._is_paused:
-            self.active.pause_timing()
+            self.active.pause_timing(at=self.active.last_user_activity_at + config.INACTIVITY_PAUSE_SECONDS)
             log.info("engine.timing_paused", episode=self.active.case_name, idle_s=round(idle))
 
         return None

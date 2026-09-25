@@ -5,7 +5,7 @@
 
 CREATE TABLE IF NOT EXISTS episode_screenshots (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  episode_id   UUID NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+  episode_id   TEXT NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
   user_id      UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   storage_path TEXT NOT NULL,
   uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT now()

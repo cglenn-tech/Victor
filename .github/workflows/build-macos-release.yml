@@ -1,12 +1,16 @@
 name: Build and release Victor for macOS
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/build-macos-release.yml"
+      - "agent/**"
   workflow_dispatch:
     inputs:
       version:
         description: "Release version (for example 0.1.1)"
         required: true
-        default: "0.1.1"
+        default: "1.1.0"
   push:
     branches:
       - main
@@ -50,7 +54,7 @@ jobs:
           elif [[ -n "${{ inputs.version }}" ]]; then
             VERSION="${{ inputs.version }}"
           else
-            VERSION="0.1.1"
+            VERSION="1.1.0"
           fi
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "tag=v${VERSION}" >> "${GITHUB_OUTPUT}"
@@ -92,6 +96,24 @@ jobs:
           hdiutil imageinfo "dist/Victor-${BUILD_VERSION}-mac.dmg" >/dev/null
           ls -lh "dist/Victor-${BUILD_VERSION}-mac.dmg" "dist/Victor-mac.dmg"
 
+      - name: Start packaged runtime and verify encrypted storage
+        working-directory: agent
+        timeout-minutes: 3
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          log = Path(tempfile.gettempdir()) / 'victor-self-test.log'
+          log.unlink(missing_ok=True)
+          result = subprocess.run(['dist/Victor.app/Contents/MacOS/Victor', '--self-test'], timeout=90)
+          if log.exists():
+              print(log.read_text())
+          else:
+              raise SystemExit('Packaged app did not complete its startup check')
+          raise SystemExit(result.returncode)
+          PY
+
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -100,6 +122,7 @@ jobs:
           if-no-files-found: error
 
       - name: Create GitHub release
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}

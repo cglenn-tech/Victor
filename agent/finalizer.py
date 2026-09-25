@@ -78,8 +78,7 @@ def _structured_key_observations(
         seen.add(text.lower())
         stamp = (so.start_time or "")[11:16] or episode.started_at[11:16]
         key_obs.append(KeyObservation(timestamp=stamp, text=text))
-        if len(key_obs) >= config.MAX_KEY_OBSERVATIONS:
-            break
+
 
     counts: dict[str, int] = {}
     for so in episode._structured_observations:
@@ -106,8 +105,7 @@ def _template_observations(raw: list[RawObservation]) -> list[KeyObservation]:
         if key_obs and key_obs[-1].text == text:
             continue
         key_obs.append(KeyObservation(timestamp=r.timestamp, text=text))
-        if len(key_obs) >= config.MAX_KEY_OBSERVATIONS:
-            break
+
     return key_obs
 
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { localDate } from "@/lib/work-time";
+
 import { useState, useEffect, useCallback } from "react";
 
 function isoMonday(d: Date): string {
@@ -7,13 +9,13 @@ function isoMonday(d: Date): string {
   const diff = day === 0 ? -6 : 1 - day;
   const mon = new Date(d);
   mon.setDate(d.getDate() + diff);
-  return mon.toISOString().slice(0, 10);
+  return localDate(mon);
 }
 
 function isoSunday(monday: string): string {
-  const d = new Date(monday + "T00:00:00Z");
+  const d = new Date(monday + "T12:00:00");
   d.setDate(d.getDate() + 6);
-  return d.toISOString().slice(0, 10);
+  return localDate(d);
 }
 
 function localIsoDate(d: Date): string {
@@ -79,7 +81,7 @@ export default function ReportGenerator() {
   function setLastWeek() {
     const lastMon = new Date(isoMonday(new Date()) + "T00:00:00Z");
     lastMon.setDate(lastMon.getDate() - 7);
-    const mon = lastMon.toISOString().slice(0, 10);
+    const mon = localDate(lastMon);
     setFrom(mon);
     setTo(isoSunday(mon));
   }
@@ -107,7 +109,7 @@ export default function ReportGenerator() {
       const res = await fetch("/api/report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ periodStart: from, periodEnd: to, roundTo15 }),
+        body: JSON.stringify({ periodStart: from, periodEnd: to, roundTo15, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
       });
       let json: { error?: string; report?: string; id?: string };
       try {

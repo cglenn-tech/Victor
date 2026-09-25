@@ -25,7 +25,7 @@ const STATE_LABELS: Record<CardState, string> = {
   finalizing:      'Finalizing',
   sync_pending:    'Sync pending',
   update_required: 'Update required',
-  error:           'Error',
+  error:           'Analysis unavailable — check the vision service',
 }
 
 const DOT_COLORS: Record<CardState, string> = {
@@ -40,7 +40,7 @@ const DOT_COLORS: Record<CardState, string> = {
   error:           'bg-red-400',
 }
 
-const MIN_VERSION = process.env.NEXT_PUBLIC_MIN_AGENT_VERSION ?? '0.1.0'
+const MIN_VERSION = process.env.NEXT_PUBLIC_MIN_AGENT_VERSION ?? '1.1.0'
 
 function semverLessThan(a: string, b: string): boolean {
   const pa = a.split('.').map(Number)
@@ -73,10 +73,14 @@ function getAgentVersion(presenceState: Record<string, unknown[]>): string | und
   return undefined
 }
 
-type Props = { deviceId: string }
+type Props = { deviceId: string; onDailyReview?: () => void }
 
-export default function AgentStatusCard({ deviceId }: Props) {
+export default function AgentStatusCard({ deviceId, onDailyReview }: Props) {
+  const [error, setError] = useState<string | null>(null)
+  const reviewRef = useRef(onDailyReview)
+  useEffect(() => { reviewRef.current = onDailyReview }, [onDailyReview])
   const [state, setState] = useState<CardState>('connecting')
+  const versionAllowed = useRef(false)
   const channelRef = useRef<RealtimeChannel | null>(null)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -108,9 +112,11 @@ export default function AgentStatusCard({ deviceId }: Props) {
     function handleAgentConnected(presenceState: Record<string, unknown[]>) {
       clearConnectingTimeout()
       const version = getAgentVersion(presenceState)
-      if (version && semverLessThan(version, MIN_VERSION)) {
+      if (!version || !/^\d+\.\d+\.\d+$/.test(version) || semverLessThan(version, MIN_VERSION)) {
+        versionAllowed.current = false
         setState('update_required')
       } else {
+        versionAllowed.current = true
         // Ask agent for its current state
         channel.send({ type: 'broadcast', event: 'status_request', payload: {} })
       }
@@ -118,6 +124,7 @@ export default function AgentStatusCard({ deviceId }: Props) {
 
     // ── Status broadcast from agent ───────────────────────────────────────────
     channel.on('broadcast', { event: 'status' }, ({ payload }) => {
+      if (!versionAllowed.current) return
       const agentState: string = payload?.state ?? ''
       if (agentState === 'recording') {
         clearConnectingTimeout()
@@ -129,10 +136,14 @@ export default function AgentStatusCard({ deviceId }: Props) {
         setState('stopping')
       } else if (agentState === 'finalizing') {
         setState('finalizing')
+      } else if (agentState === 'error') {
+        setState('error')
       } else if (agentState === 'sync_pending') {
         setState('sync_pending')
       }
     })
+
+    channel.on('broadcast', { event: 'daily_review' }, () => reviewRef.current?.())
 
     // ── Presence: detect agent ────────────────────────────────────────────────
     channel.on('presence', { event: 'sync' }, () => {
@@ -197,17 +208,22 @@ export default function AgentStatusCard({ deviceId }: Props) {
     }
   }, [deviceId])
 
-  function sendStart() {
-    setState('connecting')  // wait for agent's recording confirmation
-    channelRef.current?.send({ type: 'broadcast', event: 'start', payload: {} })
+  async function command(action: 'start' | 'stop') {
+    setError(null)
+    try {
+      const res = await fetch('/api/device/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, deviceId }) })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Unable to update session')
+      setState(action === 'start' ? 'connecting' : 'stopping')
+      await channelRef.current?.send({ type: 'broadcast', event: action, payload: {} })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update session')
+    }
   }
+  const sendStart = () => command('start')
+  const sendStop = () => command('stop')
 
-  function sendStop() {
-    setState('stopping')
-    channelRef.current?.send({ type: 'broadcast', event: 'stop', payload: {} })
-  }
-
-  const label = STATE_LABELS[state]
+  const label = error ?? STATE_LABELS[state]
   const dotColor = DOT_COLORS[state]
 
   if (state === 'offline') {
@@ -250,6 +266,7 @@ export default function AgentStatusCard({ deviceId }: Props) {
           <span className={`w-2 h-2 rounded-full inline-block ${dotColor}`} />
           <p className="text-sm font-medium text-neutral-700">{label}</p>
         </div>
+        {error && <p role="alert" className="text-sm text-red-600 mb-3">{error}</p>}
         <button
           onClick={sendStart}
           className="text-sm font-medium bg-neutral-900 text-white px-4 py-1.5 rounded
@@ -279,13 +296,14 @@ export default function AgentStatusCard({ deviceId }: Props) {
     )
   }
 
-  // connecting / stopping / sync_pending / error — status-only display
+  // Keep Stop available while analysis or syncing is failing.
   return (
     <div className="border border-neutral-200 rounded-xl p-5 mb-6">
       <div className="flex items-center gap-2">
         <span className={`w-2 h-2 rounded-full inline-block ${dotColor}`} />
         <p className="text-sm text-neutral-500">{label}</p>
       </div>
+      {state !== 'connecting' && <button onClick={sendStop} className="text-sm border rounded px-3 py-1 mt-3">Stop Work Session</button>}
     </div>
   )
 }

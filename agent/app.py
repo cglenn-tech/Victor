@@ -15,11 +15,11 @@ Menu bar icon:
   🟢  recording
 """
 import threading
-import config
-from browser_open import open_url
-
 from dotenv import load_dotenv
 load_dotenv()
+
+import config
+from browser_open import open_url
 
 import AppKit
 import Foundation
@@ -36,9 +36,14 @@ _kAEGetURL = 0x4755524C            # 'GURL'
 class AppDelegate(AppKit.NSObject):
 
     _stop_event = objc.ivar()
+    _agent_thread = objc.ivar()
     _status_item = objc.ivar()
     _label_item = objc.ivar()
     _connect_item = objc.ivar()
+    _startup_lock = objc.ivar()
+    _worker_lock = objc.ivar()
+    _terminating = objc.ivar()
+    _suspended = objc.ivar()
 
     def applicationDidFinishLaunching_(self, notification):
         # No Dock icon — pure menu-bar accessory
@@ -54,6 +59,11 @@ class AppDelegate(AppKit.NSObject):
         )
 
         self._stop_event = threading.Event()
+        self._agent_thread = None
+        self._startup_lock = threading.Lock()
+        self._worker_lock = threading.Lock()
+        self._terminating = False
+        self._suspended = False
 
         # ── Menu bar status item ───────────────────────────────────────────────
         status_bar = AppKit.NSStatusBar.systemStatusBar()
@@ -119,6 +129,13 @@ class AppDelegate(AppKit.NSObject):
             None,
         )
 
+        for name in (AppKit.NSWorkspaceDidWakeNotification,
+                     AppKit.NSWorkspaceSessionDidBecomeActiveNotification,
+                     AppKit.NSWorkspaceScreensDidWakeNotification):
+            nc.addObserver_selector_name_object_(
+                self, objc.selector(self.workspaceWake_, signature=b'v@:@'), name, None,
+            )
+
         # ── Credential and permission check, then start ────────────────────────
         # Already signed in (device credential): open the web app/dashboard.
         # First-time install: auth.activate() opens the sign-in / activate URL.
@@ -139,18 +156,25 @@ class AppDelegate(AppKit.NSObject):
     def workspaceScreenLocked_(self, notification):
         self._on_security_boundary("device_locked")
 
+    def workspaceWake_(self, notification):
+        self._suspended = False
+        if auth.read_credential() and not self._terminating:
+            threading.Thread(target=self._startup, daemon=True).start()
+
     def _on_security_boundary(self, reason: str) -> None:
         """
         Called at every security boundary crossing (sleep, lock, logout).
         Phase 1: invalidates all capture leases so re-consent is required on resume.
         Always stops the agent loop.
         """
-        import config
+        self._suspended = True
+        self._emergency_stop()
         if config.ENABLE_CAPTURE_LEASES:
             # Notify the agent loop to invalidate leases via the shared event;
             # ConsentManager.invalidate_all() is called inside the agent loop
             # on next wake via the session epoch stored in SQLite.
             # We also set a flag so the next startup knows to show batch re-consent.
+            conn = None
             try:
                 import database
                 conn = database.connect()
@@ -162,11 +186,14 @@ class AppDelegate(AppKit.NSObject):
                 conn.commit()
             except Exception:
                 pass
-        self._emergency_stop()
+            finally:
+                if conn is not None:
+                    conn.close()
 
     def _emergency_stop(self):
-        realtime_client.force_stop()
-        self._stop_event.set()
+        with self._worker_lock:
+            realtime_client.force_stop()
+            self._stop_event.set()
 
     def _get_display_name(self) -> str:
         try:
@@ -183,6 +210,15 @@ class AppDelegate(AppKit.NSObject):
         return platform.node() or 'My Mac'
 
     def _startup(self):
+        if not self._startup_lock.acquire(blocking=False):
+            return
+        try:
+            if not self._terminating and not self._suspended:
+                self._activate_and_start()
+        finally:
+            self._startup_lock.release()
+
+    def _activate_and_start(self):
         """Run credential check, permission check, then start the agent."""
         # 1. Ensure credential
         if not auth.read_credential():
@@ -215,16 +251,20 @@ class AppDelegate(AppKit.NSObject):
         """Open dashboard if already signed in; otherwise start activation/sign-in."""
         if auth.read_credential():
             open_url(config.BASE_URL)
-            return
         threading.Thread(target=self._startup, daemon=True).start()
 
     def disconnectAccount_(self, sender):
-        """Revoke device on server and clear local credential."""
-        realtime_client.force_stop()
-        auth.disconnect()
-        AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(
-            lambda: self._label_item.setTitle_("Victor: Disconnected")
-        )
+        self._emergency_stop()
+        threading.Thread(target=self._disconnect, daemon=True).start()
+
+    def _disconnect(self):
+        with self._startup_lock:
+            auth.disconnect()
+        self._on_agent_state('disconnected')
+
+    def _reconnect(self):
+        self._disconnect()
+        self._startup()
 
     def handleGetURL_withReplyEvent_(self, event, replyEvent):
         """Handle buildharvey:// URL scheme events sent by macOS."""
@@ -234,14 +274,14 @@ class AppDelegate(AppKit.NSObject):
         url_str = url_desc.stringValue()
         if not url_str:
             return
-        print(f"[app] URL event: {url_str}")
         normalized = url_str.replace('buildharvey://', 'victor://', 1)
         if normalized.startswith('victor://disconnect'):
-            threading.Thread(target=self.disconnectAccount_, args=(None,), daemon=True).start()
+            self.disconnectAccount_(None)
         elif normalized.startswith('victor://reconnect'):
-            auth.delete_credential()
+            self._emergency_stop()
+            threading.Thread(target=self._reconnect, daemon=True).start()
+        elif normalized.startswith('victor://open'):
             threading.Thread(target=self._startup, daemon=True).start()
-        # victor://open — no action needed; macOS already foregrounded the app
 
     def _prompt_permissions(self):
         alert = AppKit.NSAlert.alloc().init()
@@ -260,12 +300,44 @@ class AppDelegate(AppKit.NSObject):
             AppKit.NSApp.terminate_(None)
 
     def startAgent(self):
-        self._stop_event.clear()
-        threading.Thread(target=self._run_agent, daemon=True).start()
+        # This method runs on the startup thread, never on the UI thread.
+        previous = self._agent_thread
+        if previous and previous.is_alive():
+            if not self._stop_event.is_set():
+                return
+            previous.join()  # finish saving the old account before a new worker
+        with self._worker_lock:
+            if self._terminating or self._suspended:
+                return
+            self._stop_event = threading.Event()
+            self._agent_thread = threading.Thread(
+                target=self._run_agent, args=(self._stop_event,), daemon=True,
+            )
+            self._agent_thread.start()
 
-    def _run_agent(self):
+    def _run_agent(self, stop_event):
         import main as agent_main
-        agent_main.main(state_callback=self._on_agent_state, stop_event=self._stop_event)
+        try:
+            agent_main.main(state_callback=self._on_agent_state, stop_event=stop_event)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self._on_agent_state('error')
+
+    def applicationShouldTerminate_(self, app):
+        self._terminating = True
+        self._emergency_stop()
+        worker = self._agent_thread
+        if not worker or not worker.is_alive():
+            return AppKit.NSTerminateNow
+
+        def finish():
+            worker.join()
+            AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(
+                lambda: app.replyToApplicationShouldTerminate_(True)
+            )
+        threading.Thread(target=finish, daemon=True).start()
+        return AppKit.NSTerminateLater
 
     def _on_agent_state(self, state: str) -> None:
         """Called from main.py state_callback on the agent thread. Dispatches to main queue."""
@@ -275,7 +347,11 @@ class AppDelegate(AppKit.NSObject):
                 self._label_item.setTitle_("Victor: Recording")
             else:
                 self._status_item.button().setTitle_("⬛")
-                self._label_item.setTitle_("Victor: Idle")
+                labels = {
+                    'connecting': 'Connecting…', 'error': 'Connection or analysis error',
+                    'reconnect_required': 'Reconnect account', 'disconnected': 'Disconnected',
+                }
+                self._label_item.setTitle_("Victor: " + labels.get(state, 'Idle'))
 
         AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(update)
 
@@ -291,4 +367,8 @@ def main():
 
 
 if __name__ == '__main__':
+    import sys
+    if '--self-test' in sys.argv:
+        from self_test import run_self_test
+        sys.exit(run_self_test())
     main()

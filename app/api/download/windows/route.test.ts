@@ -35,7 +35,7 @@ function mockAuth(user: UserStub | null = { id: 'usr-1', email: 'test@example.co
         error: user ? null : { message: 'no session' },
       }),
     },
-  } as ReturnType<Awaited<ReturnType<typeof getServerClient>>>)
+  } as unknown as Awaited<ReturnType<typeof getServerClient>>)
 }
 
 function mockAdmin(options: {

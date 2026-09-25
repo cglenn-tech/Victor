@@ -13,7 +13,7 @@ type FetchState =
   | { status: 'ready'; deviceId: string }
   | { status: 'error' }
 
-export default function DesktopAgentCard() {
+export default function DesktopAgentCard({ onDailyReview }: { onDailyReview?: () => void }) {
   const [fetchState, setFetchState] = useState<FetchState>({ status: 'loading' })
 
   useEffect(() => {
@@ -50,7 +50,7 @@ export default function DesktopAgentCard() {
       <div className="border border-neutral-200 rounded-xl p-5 mb-6">
         <p className="text-sm text-neutral-600 mb-3">
           Install the VICTOR desktop app to start capturing your work.
-          Your browser does not need to stay open while recording.
+          Start and stop work from your signed-in dashboard.
         </p>
         <DownloadButton />
       </div>
@@ -59,9 +59,9 @@ export default function DesktopAgentCard() {
 
   return (
     <div>
-      <AgentStatusCard deviceId={fetchState.deviceId} />
+      <AgentStatusCard deviceId={fetchState.deviceId} onDailyReview={onDailyReview} />
       <p className="text-xs text-neutral-400 -mt-4 mb-6 px-1">
-        You may close this page. The VICTOR desktop app will continue recording.
+        Recording stops when you sign out, or after 10 minutes with no Victor page open.
       </p>
     </div>
   )

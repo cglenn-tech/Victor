@@ -41,6 +41,7 @@ export default async function Home({ searchParams }: HomeProps) {
     .from('episodes')
     .select('*')
     .eq('user_id', user.id)
+    .is('deleted_at', null)
     .order('started_at', { ascending: false })
 
   const episodes = (data as Episode[]) ?? []
@@ -52,7 +53,7 @@ export default async function Home({ searchParams }: HomeProps) {
         <p className="text-sm text-neutral-500 mb-8">
           Work captured by case. Generate a report when you&apos;re ready.
         </p>
-        <HomepageClient episodes={episodes} />
+        <HomepageClient key={user.id} episodes={episodes} />
       </main>
     </>
   )

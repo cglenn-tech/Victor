@@ -2,6 +2,7 @@
 export type Observation = {
   id: string;
   user_id: string;
+  deleted_at?: string | null;
   observed_at: string;
   created_at: string;
   screenshot_path?: string | null;
@@ -25,6 +26,9 @@ export type KeyObservation = {
 
 export type Episode = {
   id: string;                                    // UUID-formatted TEXT for web; TEXT for desktop
+  observation_count?: number;
+  device_id?: string | null;
+  deleted_at?: string | null;
   case_name: string;
   work_type: 'project' | 'administrative';
   issue_worked_on?: string | null;

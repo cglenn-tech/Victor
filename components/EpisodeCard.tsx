@@ -1,5 +1,6 @@
 "use client";
 
+import { activeMinutes } from '@/lib/work-time'
 import Link from "next/link";
 import { useState } from "react";
 import type { Episode } from "@/lib/types";
@@ -31,6 +32,8 @@ export default function EpisodeCard({
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [merging, setMerging] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [minutes, setMinutes] = useState(String(Math.round(activeMinutes(episode) * 100) / 100));
   const [saving, setSaving] = useState(false);
 
   // Edit form state — synced from episode prop
@@ -44,21 +47,29 @@ export default function EpisodeCard({
   );
 
   const time = fmt12Range(episode.started_at, episode.ended_at);
-  const duration = fmtDuration(episode.duration_minutes);
+  const duration = fmtDuration(activeMinutes(episode));
 
   async function handleDelete() {
     setDeleting(true);
-    await fetch(`/api/episodes/${episode.id}`, { method: "DELETE" });
-    onDelete(episode.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/episodes/${episode.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error('Unable to delete this entry');
+      onDelete(episode.id);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Unable to delete'); }
+    finally { setDeleting(false); }
   }
 
   async function handleSave() {
     setSaving(true);
+    setError(null);
     try {
+      if (!minutes.trim() || !Number.isFinite(Number(minutes)) || Number(minutes) < 0) throw new Error("Enter valid minutes");
       const res = await fetch(`/api/episodes/${episode.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          duration_minutes: Number(minutes),
           case_name: caseName.trim() || episode.case_name,
           work_type: workType,
           issue_worked_on: issue.trim() || null,
@@ -69,8 +80,9 @@ export default function EpisodeCard({
         const json = await res.json();
         onUpdate(json.episode);
         setEditing(false);
-      }
-    } finally {
+      } else throw new Error((await res.json()).error ?? 'Unable to save');
+    } catch (err) { setError(err instanceof Error ? err.message : 'Unable to save'); }
+    finally {
       setSaving(false);
     }
   }
@@ -79,6 +91,7 @@ export default function EpisodeCard({
     setCaseName(episode.case_name);
     setWorkType(episode.work_type ?? "project");
     setIssue(episode.issue_worked_on ?? "");
+    setMinutes(String(Math.round(activeMinutes(episode) * 100) / 100));
     setIsReportable(episode.is_reportable !== false);
     setEditing(false);
   }
@@ -152,10 +165,14 @@ export default function EpisodeCard({
   if (editing) {
     return (
       <div className="px-6 py-5 bg-neutral-50">
+        {error && <p role="alert" className="text-sm text-red-600 mb-3">{error}</p>}
         <div className="space-y-3 mb-4">
+          <label className="block text-xs text-neutral-500">Recorded minutes (editable estimate)
+            <input type="number" min="0" step="0.01" value={minutes} onChange={e => setMinutes(e.target.value)} className="block border rounded px-2 py-1 mt-1" />
+          </label>
           <div>
             <label className="block text-xs text-neutral-500 mb-1">
-              Project title
+              Client / matter
             </label>
             <input
               type="text"
@@ -232,6 +249,7 @@ export default function EpisodeCard({
   // ── Expanded ───────────────────────────────────────────────────────────────
   return (
     <div className="px-6 py-5 bg-neutral-50">
+      {error && <p role="alert" className="text-sm text-red-600 mb-3">{error}</p>}
       <div className="flex items-start justify-between gap-4 mb-4">
         <div>
           {titleLink}

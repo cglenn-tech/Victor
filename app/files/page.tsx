@@ -1,3 +1,4 @@
+import { activeMinutes } from '@/lib/work-time'
 import { redirect } from "next/navigation";
 import { getServerClient } from "@/lib/supabase-server";
 import { fmt12Date } from "@/lib/fmt";
@@ -29,7 +30,7 @@ function EpisodeFilesRow({ episode }: { episode: Episode }) {
     hour12: true,
   });
   const duration = (() => {
-    const m = episode.duration_minutes;
+    const m = activeMinutes(episode);
     if (!m || m < 1) return "< 1m";
     const h = Math.floor(m / 60);
     const min = Math.round(m % 60);
@@ -71,7 +72,7 @@ export default async function FilesPage() {
     supabase
       .from("episodes")
       .select(
-        "id, case_name, work_type, started_at, ended_at, duration_minutes, key_observations, is_reportable, created_at"
+        "id, case_name, work_type, started_at, ended_at, duration_minutes, active_seconds, key_observations, is_reportable, created_at"
       )
       .eq("user_id", user.id)
       .eq("is_reportable", true)

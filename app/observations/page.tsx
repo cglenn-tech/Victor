@@ -23,6 +23,7 @@ export default async function ObservationsPage() {
     .from('observations')
     .select('*')
     .eq('user_id', user.id)
+    .is('deleted_at', null)
     .order('observed_at', { ascending: false })
 
   const observations = (data as Observation[]) ?? []
@@ -35,7 +36,7 @@ export default async function ObservationsPage() {
           Observations from your work sessions, newest first. Approve, edit, or delete —
           approved observations feed your weekly report.
         </p>
-        <ObservationsClient observations={observations} />
+        <ObservationsClient key={user.id} observations={observations} />
       </main>
     </>
   )

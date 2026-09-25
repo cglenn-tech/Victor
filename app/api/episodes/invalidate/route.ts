@@ -1,22 +1,6 @@
-import { createHash } from 'crypto'
+import { getDeviceFromToken } from '@/lib/device-auth'
 import type { NextRequest } from 'next/server'
 import { getAdminClient } from '@/lib/supabase-admin'
-
-async function getDeviceFromToken(authHeader: string | null) {
-  if (!authHeader?.startsWith('Bearer ')) return null
-  const rawToken = authHeader.slice(7)
-  const tokenHash = createHash('sha256').update(rawToken).digest('hex')
-
-  const admin = getAdminClient()
-  const { data: device } = await admin
-    .from('devices')
-    .select('id, user_id')
-    .eq('token_hash', tokenHash)
-    .is('revoked_at', null)
-    .single()
-
-  return device ?? null
-}
 
 export async function POST(request: NextRequest) {
   const device = await getDeviceFromToken(request.headers.get('authorization'))
@@ -32,7 +16,7 @@ export async function POST(request: NextRequest) {
   }
 
   const { ids } = body
-  if (!Array.isArray(ids) || ids.length === 0) {
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > 500 || ids.some(id => typeof id !== 'string')) {
     return Response.json({ error: 'Missing ids' }, { status: 400 })
   }
 
@@ -42,6 +26,8 @@ export async function POST(request: NextRequest) {
     .update({ is_reportable: false })
     .in('id', ids)
     .eq('user_id', device.user_id)
+    .eq('device_id', device.id)
+    .is('edited_at', null)
 
   if (error) {
     return Response.json({ error: error.message }, { status: 500 })

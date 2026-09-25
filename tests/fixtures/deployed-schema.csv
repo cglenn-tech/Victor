@@ -1,0 +1,57 @@
+table_name,column_name,data_type
+app_releases,id,uuid
+app_releases,platform,text
+app_releases,version,text
+app_releases,storage_path,text
+app_releases,sha256,text
+app_releases,active,boolean
+app_releases,created_at,timestamp with time zone
+app_releases,minimum_version,text
+device_activations,id,uuid
+device_activations,token_hash,text
+device_activations,polling_verifier,text
+device_activations,device_name,text
+device_activations,platform,text
+device_activations,expires_at,timestamp with time zone
+device_activations,approved_at,timestamp with time zone
+device_activations,approved_by,uuid
+device_activations,device_id,uuid
+device_activations,created_at,timestamp with time zone
+device_activations,installation_id,uuid
+devices,id,uuid
+devices,user_id,uuid
+devices,name,text
+devices,platform,text
+devices,token_hash,text
+devices,activated_at,timestamp with time zone
+devices,last_seen_at,timestamp with time zone
+devices,revoked_at,timestamp with time zone
+devices,created_at,timestamp with time zone
+devices,app_version,text
+devices,installation_id,uuid
+download_events,id,uuid
+download_events,user_id,uuid
+download_events,release_id,uuid
+download_events,downloaded_at,timestamp with time zone
+episode_screenshots,id,uuid
+episode_screenshots,episode_id,text
+episode_screenshots,user_id,uuid
+episode_screenshots,storage_path,text
+episode_screenshots,uploaded_at,timestamp with time zone
+episodes,id,text
+episodes,case_name,text
+episodes,started_at,timestamp with time zone
+episodes,ended_at,timestamp with time zone
+episodes,duration_minutes,numeric
+episodes,key_observations,jsonb
+episodes,created_at,timestamp with time zone
+episodes,is_reportable,boolean
+episodes,work_type,text
+episodes,issue_worked_on,text
+episodes,edited_at,timestamp with time zone
+profiles,id,uuid
+profiles,email,text
+profiles,created_at,timestamp with time zone
+rate_limit_windows,key,text
+rate_limit_windows,count,integer
+rate_limit_windows,created_at,timestamp with time zone

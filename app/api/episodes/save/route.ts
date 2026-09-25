@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
 
   const admin = getAdminClient()
 
-  const { error } = await admin.from('episodes').upsert(
+  const { error } = await admin.from('episodes').insert(
     {
       id: body.id,
       case_name: body.case_name,
@@ -47,11 +47,10 @@ export async function POST(request: NextRequest) {
       user_id: user.id,
       device_id: null,
     },
-    { onConflict: 'id', ignoreDuplicates: false }
   )
 
   if (error) {
-    return Response.json({ error: error.message }, { status: 500 })
+    return Response.json({ error: error.message }, { status: error.code === '23505' ? 409 : 500 })
   }
 
   return Response.json({ ok: true })

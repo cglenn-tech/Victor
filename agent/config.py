@@ -69,7 +69,7 @@ MODEL_TIMEOUT_SECONDS = 60          # per-request timeout
 MODEL_MAX_RETRIES = 3              # retries on network/5xx/429 (exponential backoff)
 
 # ── Observation batching (screenshots → one structured observation) ──────────
-OBSERVATION_BATCH_SIZE = int(os.environ.get("OBSERVATION_BATCH_SIZE", "5"))
+OBSERVATION_BATCH_SIZE = max(1, min(5, int(os.environ.get("OBSERVATION_BATCH_SIZE", "5"))))
 OBSERVATION_FLUSH_IDLE_SECONDS = int(os.environ.get("OBSERVATION_FLUSH_IDLE_SECONDS", "600"))
 MIN_OBSERVATION_BATCH = 2          # below this, idle flushes drop the partial batch
 
@@ -83,13 +83,14 @@ BASE_URL = os.environ.get("BUILDHARVEY_BASE_URL", "https://buildharvey.com")
 try:
     from _version import __version__ as APP_VERSION
 except ImportError:
-    APP_VERSION = 'unknown'
+    APP_VERSION = '1.1.0'
 
 # ── Privacy mode (master switch) ─────────────────────────────────────────────
 # PRIVATE_MODE=true is the production default. CI and development set it to
 # false explicitly to allow cloud paths and disable encryption.
 # When true: capture leases required, local inference required, SQLite encrypted,
-# sync disabled, cloud vision/finalizer fallback disabled.
+# The active main.py pipeline still syncs text and uses authenticated hosted vision;
+# PRIVATE_MODE here controls local storage/consent, not a network isolation guarantee.
 #
 # PRODUCTION_BUILD=True: env var override is ignored — PRIVATE_MODE is always True.
 if PRODUCTION_BUILD:

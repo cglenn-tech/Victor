@@ -16,7 +16,7 @@ export async function DELETE(
   }
 
   // RLS ensures user can only delete their own observations
-  const { error } = await supabase.from('observations').delete().eq('id', id)
+  const { error } = await supabase.from('observations').update({ deleted_at: new Date().toISOString(), is_approved: false }).eq('id', id).eq('user_id', user.id)
 
   if (error) {
     return Response.json({ error: error.message }, { status: 500 })
@@ -46,6 +46,7 @@ export async function PATCH(
   const { data: existing, error: lookupErr } = await admin
     .from('observations')
     .select('id, user_id')
+    .is('deleted_at', null)
     .eq('id', id)
     .single()
 
@@ -56,7 +57,14 @@ export async function PATCH(
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const body = await request.json()
+  let body
+  try { body = await request.json() } catch { return Response.json({ error: 'Invalid JSON' }, { status: 400 }) }
+  if (!body || typeof body !== 'object' ||
+      ('title' in body && (typeof body.title !== 'string' || body.title.length > 500)) ||
+      ('summary' in body && (typeof body.summary !== 'string' || !body.summary.trim() || body.summary.length > 10000)) ||
+      ('is_approved' in body && typeof body.is_approved !== 'boolean')) {
+    return Response.json({ error: 'Invalid edit' }, { status: 400 })
+  }
   const patch: Record<string, unknown> = {}
   let textEdited = false
   for (const key of PATCHABLE) {
@@ -65,12 +73,17 @@ export async function PATCH(
       if (key === 'title' || key === 'summary') textEdited = true
     }
   }
-  if (textEdited) patch.edited_at = new Date().toISOString()
+  if (textEdited) {
+    patch.edited_at = new Date().toISOString()
+    patch.is_approved = body.is_approved === true
+  }
 
   const { data, error } = await admin
     .from('observations')
     .update(patch)
     .eq('id', id)
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
     .select('*')
     .single()
 

@@ -1,5 +1,6 @@
 'use client'
 
+import { activeMinutes } from '@/lib/work-time'
 import { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import type { Episode } from '@/lib/types'
@@ -89,14 +90,14 @@ function computeSummary(episodes: Episode[], period: Period, customStart: string
 
   for (const ep of filtered) {
     if (ep.work_type === 'administrative') {
-      adminMinutes += ep.duration_minutes ?? 0
+      adminMinutes += activeMinutes(ep)
     } else {
       const k = (ep.case_name?.trim() || 'Unknown').toLowerCase().replace(/\s+/g, ' ')
       if (projectMap[k]) {
-        projectMap[k].minutes += ep.duration_minutes ?? 0
+        projectMap[k].minutes += activeMinutes(ep)
       } else {
         projectMap[k] = {
-          minutes: ep.duration_minutes ?? 0,
+          minutes: activeMinutes(ep),
           displayName: ep.case_name?.trim() || 'Unknown',
         }
       }
