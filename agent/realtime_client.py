@@ -13,6 +13,7 @@ import time
 import traceback
 import urllib.request
 import urllib.error
+from contextlib import suppress
 from typing import Optional
 
 import auth
@@ -259,9 +260,27 @@ async def _connect_once() -> None:
 
     client = AsyncRealtimeClient(
         realtime_url,
-        access_token,
+        creds['anon_key'],
     )
-    await client.connect()
+    # The gateway API key and the user's channel JWT are different credentials.
+    # Putting the user JWT in ?apikey= makes the gateway reject the WebSocket.
+    await client.set_auth(access_token)
+    try:
+        await client.connect()
+        await _serve_channel(client, topic, connection_token, expires_at)
+    finally:
+        _channel = None
+        _credentials = None
+        _credentials_token = None
+        with suppress(Exception):
+            await client.close()
+
+
+async def _serve_channel(client, topic, connection_token, expires_at):
+    """Callbacks in realtime-py are synchronous, including presence callbacks."""
+    global _channel, _browser_present
+    from realtime import RealtimeSubscribeStates
+
     print("[realtime] WebSocket open")
 
     channel = client.channel(topic, {
@@ -271,17 +290,22 @@ async def _connect_once() -> None:
             'private': True,
         }
     })
-    _channel = channel
+    tasks = set()
+
+    def schedule(coroutine):
+        task = asyncio.create_task(coroutine)
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
 
     # ── Broadcast handlers ────────────────────────────────────────────────────
 
-    async def on_start(payload, ref=None, join_ref=None):
+    def on_start(payload, ref=None, join_ref=None):
         print("[realtime] ← start (browser)")
         global _last_session_check
         _last_session_check = 0
         # main.py broadcasts 'recording' once capture actually starts
 
-    async def on_stop(payload, ref=None, join_ref=None):
+    def on_stop(payload, ref=None, join_ref=None):
         print("[realtime] ← stop (browser)")
         # Don't clear if locally started — local controls take priority
         with _lock:
@@ -291,8 +315,8 @@ async def _connect_once() -> None:
         _recording_event.clear()
         # main.py broadcasts 'idle' once episode is finalized
 
-    async def on_status_request(payload, ref=None, join_ref=None):
-        await _broadcast_status(_current_state)
+    def on_status_request(payload, ref=None, join_ref=None):
+        schedule(_broadcast_status(_current_state))
 
     channel.on_broadcast('start', on_start)
     channel.on_broadcast('stop', on_stop)
@@ -300,7 +324,7 @@ async def _connect_once() -> None:
 
     # ── Presence handler ──────────────────────────────────────────────────────
 
-    async def on_presence_sync():
+    def on_presence_sync():
         global _browser_present, _grace_timer
         state = channel.presence_state()
         has_browser = any(
@@ -317,7 +341,7 @@ async def _connect_once() -> None:
             print("[realtime] browser connected")
             _cancel_grace_timer()
             # Send current status to the newly connected browser
-            await _broadcast_status(_current_state)
+            schedule(_broadcast_status(_current_state))
 
         elif not has_browser and was_browser:
             if _recording_event.is_set():
@@ -334,70 +358,50 @@ async def _connect_once() -> None:
     # ── Subscribe ─────────────────────────────────────────────────────────────
 
     subscribe_done = asyncio.Event()
+    connection_failed = asyncio.Event()
+    subscribed = False
 
     def on_subscribe(status, err=None):
+        nonlocal subscribed
         print(f"[realtime] channel → {status}")
+        subscribed = status == RealtimeSubscribeStates.SUBSCRIBED
+        if not subscribed:
+            connection_failed.set()
         subscribe_done.set()
 
-    await channel.subscribe(on_subscribe)
-    await asyncio.wait_for(subscribe_done.wait(), timeout=10)
-
-    await channel.track({
-        'type': 'agent',
-        'state': _current_state,
-        'version': config.APP_VERSION,
-        'platform': sys.platform,
-        'last_seen_at': time.time(),
-    })
-    print(f"[realtime] subscribed and tracking on {topic}")
-
-    # ── Periodic re-track and heartbeat tasks ─────────────────────────────────
-
-    async def _periodic_track():
-        while True:
-            await asyncio.sleep(60)
-            try:
-                await channel.track({
-                    'type': 'agent',
-                    'state': _current_state,
-                    'version': config.APP_VERSION,
-                    'platform': sys.platform,
-                    'last_seen_at': time.time(),
-                })
-            except Exception:
-                pass
-
-    async def _heartbeat_loop():
-        loop = asyncio.get_event_loop()
-        while True:
-            await asyncio.sleep(60)
-            try:
-                await loop.run_in_executor(None, _call_heartbeat)
-            except Exception:
-                pass
-
-    track_task = asyncio.ensure_future(_periodic_track())
-    heartbeat_task = asyncio.ensure_future(_heartbeat_loop())
-
-    # ── Keep alive until token is near expiry ─────────────────────────────────
-
-    sleep_seconds = max(0.0, expires_at - time.time() - 300)
-    print(f"[realtime] will refresh token in {sleep_seconds / 3600:.1f} h")
-    deadline = time.time() + sleep_seconds
-    while time.time() < deadline and auth.read_credential() == connection_token:
-        await asyncio.sleep(1)
-    force_stop()
-
-    # Clean up before reconnect
-    track_task.cancel()
-    heartbeat_task.cancel()
-    _channel = None
-    _credentials = None  # force fresh token fetch on next connect
     try:
-        await channel.unsubscribe()
-        await client.disconnect()
-    except Exception:
-        pass
+        await channel.subscribe(on_subscribe)
+        await asyncio.wait_for(subscribe_done.wait(), timeout=15)
+        if not subscribed:
+            raise RuntimeError('Private device channel rejected the subscription')
+        _channel = channel
+
+        async def track_status():
+            await channel.track({
+                'type': 'agent', 'state': _current_state,
+                'version': config.APP_VERSION, 'platform': sys.platform,
+                'last_seen_at': time.time(),
+            })
+            await _broadcast_status(_current_state)
+
+        await track_status()
+        deadline = expires_at - 300
+        next_track = time.monotonic() + 30
+        while time.time() < deadline and auth.read_credential() == connection_token:
+            if connection_failed.is_set():
+                raise RuntimeError('Private device channel disconnected')
+            if time.monotonic() >= next_track:
+                await track_status()
+                next_track = time.monotonic() + 30
+            await asyncio.sleep(1)
+    finally:
+        _channel = None
+        for task in list(tasks):
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        with suppress(Exception):
+            await asyncio.wait_for(channel.unsubscribe(), timeout=5)
 
 
 def _call_heartbeat() -> bool:
@@ -406,14 +410,14 @@ def _call_heartbeat() -> bool:
         return False
     req = urllib.request.Request(
         f"{config.BASE_URL}/api/device/heartbeat",
-        headers={'Authorization': f'Bearer {token}'}, method='GET',
+        headers={'Authorization': f'Bearer {token}', 'X-Victor-Version': config.APP_VERSION}, method='GET',
     )
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read())
         if data.get('user_id') != auth.read_user_id() or token != auth.read_credential():
             return False
-        if data.get('device_id'):
+        if data.get('device_id') and auth.read_device_id() != data['device_id']:
             auth.store_device_id(data['device_id'])
         return data.get('recording_allowed') is True
     except Exception:

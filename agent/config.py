@@ -83,7 +83,7 @@ BASE_URL = os.environ.get("BUILDHARVEY_BASE_URL", "https://buildharvey.com")
 try:
     from _version import __version__ as APP_VERSION
 except ImportError:
-    APP_VERSION = '1.1.0'
+    APP_VERSION = '1.1.1'
 
 # ── Privacy mode (master switch) ─────────────────────────────────────────────
 # PRIVATE_MODE=true is the production default. CI and development set it to

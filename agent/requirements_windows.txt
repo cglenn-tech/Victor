@@ -12,7 +12,7 @@ Pillow
 numpy
 python-dotenv
 websockets
-realtime>=2.0.0
+realtime==2.31.0
 
 # Windows credential storage
 keyring

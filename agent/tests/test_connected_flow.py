@@ -22,7 +22,7 @@ for k, v in dict(PRIVATE_MODE=False, MAX_EPISODE_SECONDS=28800, INACTIVITY_PAUSE
                 OBSERVATION_FLUSH_IDLE_SECONDS=600, MIN_OBSERVATION_BATCH=2,
                 VISION_ANALYSIS_SIZE=(1440,900), VISION_JPEG_QUALITY=85,
                 VISION_MAX_ENCODED_BYTES=3*1024*1024, MODEL_MAX_RETRIES=0,
-                ENABLE_CAPTURE_LEASES=False, CAPTURE_INTERVAL_SECONDS=.01).items():
+                ENABLE_CAPTURE_LEASES=False, CAPTURE_INTERVAL_SECONDS=.01, APP_VERSION='1.1.1').items():
     setattr(config, k, v)
 sys.modules['config'] = config
 credentials = {'owner': 'owner-a', 'token': 'token-a'}
@@ -30,6 +30,8 @@ auth = types.ModuleType('auth')
 auth.read_user_id = lambda: credentials['owner']
 auth.read_credential = lambda: credentials['token']
 auth.store_device_id = Mock()
+auth.read_device_id = lambda: None
+auth.store_user_id = Mock(side_effect=lambda owner: credentials.update(owner=owner))
 auth._api_bearer = Mock()
 auth.delete_credential = Mock(side_effect=lambda: credentials.update(token=None))
 sys.modules['auth'] = auth
@@ -204,7 +206,7 @@ class ConnectedFlow(unittest.TestCase):
         stop = Mock()
         stop.is_set.return_value = False
         callback = Mock()
-        with patch.object(auth, '_api_bearer', side_effect=[OSError('offline'), {'ok': True}]) as api:
+        with patch.object(auth, '_api_bearer', side_effect=[OSError('offline'), {'ok': True, 'user_id': 'owner-a'}]) as api:
             self.assertTrue(main._establish_session('owner-a', 'token-a', stop, callback))
             self.assertEqual(api.call_count, 2)
             stop.wait.assert_called_once_with(5)
@@ -218,6 +220,15 @@ class ConnectedFlow(unittest.TestCase):
         with patch.object(auth, '_api_bearer') as api:
             self.assertFalse(main._establish_session('owner-a', 'token-a', stopped))
             api.assert_not_called()
+
+    def test_legacy_token_recovers_missing_owner_from_authenticated_server(self):
+        credentials['owner'] = None
+        with patch.object(auth, '_api_bearer', return_value={'ok': True, 'user_id': 'owner-a', 'device_id': 'device-a'}):
+            self.assertTrue(main._establish_session(None, 'token-a', threading.Event()))
+        self.assertEqual(credentials['owner'], 'owner-a')
+        with patch.object(auth, '_api_bearer', return_value={'ok': True, 'user_id': 'owner-b'}):
+            self.assertFalse(main._establish_session('owner-a', 'token-a', threading.Event()))
+        self.assertEqual(credentials['owner'], 'owner-a')
 
     def test_worker_shutdown_persists_completed_work_without_new_analysis(self):
         stop = threading.Event()

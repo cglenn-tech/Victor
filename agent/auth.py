@@ -90,7 +90,7 @@ def _api_bearer(path: str, token: str, method: str = 'GET', body: Optional[dict]
     """Authenticated request to the BuildHarvey API using Bearer device token."""
     url = f"{config.BASE_URL}{path}"
     data = json.dumps(body).encode() if body else None
-    headers: dict = {'Authorization': f'Bearer {token}'}
+    headers: dict = {'Authorization': f'Bearer {token}', 'X-Victor-Version': config.APP_VERSION}
     if data:
         headers['Content-Type'] = 'application/json'
     req = urllib.request.Request(url, data=data, headers=headers, method=method)

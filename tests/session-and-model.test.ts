@@ -10,7 +10,7 @@ import { getDeviceFromToken } from '@/lib/device-auth'
 import { chatCompletion, isModelConfigured } from '@/lib/model-client'
 import { rateLimit } from '@/lib/rate-limit'
 import { POST as command } from '@/app/api/device/session/route'
-import { GET as heartbeat } from '@/app/api/device/heartbeat/route'
+import { GET as heartbeat, POST as resetSession } from '@/app/api/device/heartbeat/route'
 import { POST as analyze } from '@/app/api/agent/analyze/route'
 let update: ReturnType<typeof vi.fn>, eq: ReturnType<typeof vi.fn>
 let row: { recording_requested: boolean; browser_seen_at: string }
@@ -49,6 +49,15 @@ it('requires configuration to start and expires capture after ten minutes', asyn
   expect((await (await heartbeat(req({}))).json()).recording_allowed).toBe(false)
   row = { recording_requested: false, browser_seen_at: new Date().toISOString() }
   expect((await (await heartbeat(req({}))).json()).recording_allowed).toBe(false)
+})
+it('records the running version and returns authenticated account identity on startup', async () => {
+  const request = new Request('http://localhost/test', { method: 'POST', headers: { 'X-Victor-Version': '1.1.1' } })
+  const response = await resetSession(request)
+  expect(await response.json()).toEqual({ ok: true, user_id: 'owner-a', device_id: 'device-a' })
+  expect(update).toHaveBeenCalledWith(expect.objectContaining({ app_version: '1.1.1', recording_requested: false, last_seen_at: expect.any(String) }))
+  update.mockClear()
+  await heartbeat(new Request('http://localhost/test', { headers: { 'X-Victor-Version': 'invalid' } }))
+  expect(update.mock.calls[0][0]).not.toHaveProperty('app_version')
 })
 it('authenticates image requests, allows only inline images and never calls the model for invalid input', async () => {
   vi.mocked(getDeviceFromToken).mockResolvedValue(null)
