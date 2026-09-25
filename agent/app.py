@@ -15,6 +15,9 @@ Menu bar icon:
   🟢  recording
 """
 import threading
+from dotenv import load_dotenv
+load_dotenv()
+
 import config
 from browser_open import open_url
 
@@ -36,6 +39,7 @@ _kAEGetURL = 0x4755524C            # 'GURL'
 class AppDelegate(AppKit.NSObject):
 
     _stop_event = objc.ivar()
+    _agent_thread = objc.ivar()
     _status_item = objc.ivar()
     _label_item = objc.ivar()
     _connect_item = objc.ivar()
@@ -54,6 +58,7 @@ class AppDelegate(AppKit.NSObject):
         )
 
         self._stop_event = threading.Event()
+        self._agent_thread = None
 
         # ── Menu bar status item ───────────────────────────────────────────────
         status_bar = AppKit.NSStatusBar.systemStatusBar()
@@ -220,6 +225,7 @@ class AppDelegate(AppKit.NSObject):
 
     def disconnectAccount_(self, sender):
         """Revoke device on server and clear local credential."""
+        self._stop_event.set()
         realtime_client.force_stop()
         auth.disconnect()
         AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(
@@ -239,7 +245,7 @@ class AppDelegate(AppKit.NSObject):
         if normalized.startswith('victor://disconnect'):
             threading.Thread(target=self.disconnectAccount_, args=(None,), daemon=True).start()
         elif normalized.startswith('victor://reconnect'):
-            auth.delete_credential()
+            self.disconnectAccount_(None)
             threading.Thread(target=self._startup, daemon=True).start()
         # victor://open — no action needed; macOS already foregrounded the app
 
@@ -260,8 +266,15 @@ class AppDelegate(AppKit.NSObject):
             AppKit.NSApp.terminate_(None)
 
     def startAgent(self):
-        self._stop_event.clear()
-        threading.Thread(target=self._run_agent, daemon=True).start()
+        if self._agent_thread and self._agent_thread.is_alive():
+            if not self._stop_event.is_set():
+                return
+            self._agent_thread.join(timeout=60)
+            if self._agent_thread.is_alive():
+                return
+        self._stop_event = threading.Event()
+        self._agent_thread = threading.Thread(target=self._run_agent, daemon=True)
+        self._agent_thread.start()
 
     def _run_agent(self):
         import main as agent_main

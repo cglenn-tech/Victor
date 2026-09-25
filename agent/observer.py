@@ -36,7 +36,7 @@ _SYSTEM_APPS = frozenset({
     '', 'loginwindow', 'SystemPreferences', 'System Preferences',
     'System Settings', 'Spotlight', 'Dock', 'Finder',
     'SecurityAgent', 'UserNotificationCenter',
-    'BuildHarvey',      # the agent itself (macOS)
+    'BuildHarvey', 'Victor', 'VICTOR', # the agent itself
     'Task Manager',     # Windows
     'Explorer',         # Windows File Explorer
 })
@@ -281,3 +281,6 @@ def reset() -> None:
     _last_ocr_len = 0
     _last_saved_at = 0.0
     log.warning("observer.state_reset")
+
+    for path in (config.TEMP_FRAME_PATH, config.PREV_FRAME_PATH):
+        path.unlink(missing_ok=True)

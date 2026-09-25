@@ -19,21 +19,24 @@ export default function HomepageClient({ episodes: init }: Props) {
   // Single Supabase browser client instance shared across child components
   const [supabase] = useState(() => getBrowserClient())
 
-  // Listen for 'daily_review' broadcast from the desktop agent
+  // Polling recovers from missed Realtime events and runs on every fresh account mount.
   useEffect(() => {
-    const channel = supabase
-      .channel('agent-events')
-      .on('broadcast', { event: 'daily_review' }, () => {
-        setShowDailyReview(true)
-      })
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
+    let cancelled = false
+    let running = false
+    async function refresh() {
+      if (running) return
+      running = true
+      try {
+        const response = await fetch('/api/episodes', { cache: 'no-store' })
+        if (response.ok && !cancelled) setEpisodes(await response.json())
+      } finally { running = false }
     }
-  }, [supabase])
+    const timer = setInterval(() => { void refresh().catch(() => {}) }, 5000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [])
 
   function handleEpisodeSaved(ep: Episode) {
+    if (ep.deleted_at) { setEpisodes(prev => prev.filter(e => e.id !== ep.id)); return }
     setEpisodes((prev) => {
       const exists = prev.some((e) => e.id === ep.id)
       return exists
@@ -60,6 +63,7 @@ export default function HomepageClient({ episodes: init }: Props) {
 
   // Callback for ThisWeekSummary's Realtime subscription to bubble up new episodes
   const handleEpisodeUpdate = useCallback((ep: Episode) => {
+    if (ep.deleted_at) { setEpisodes(prev => prev.filter(e => e.id !== ep.id)); return }
     setEpisodes((prev) => {
       const exists = prev.some((e) => e.id === ep.id)
       return exists
@@ -70,7 +74,7 @@ export default function HomepageClient({ episodes: init }: Props) {
 
   return (
     <>
-      <DesktopAgentCard />
+      <DesktopAgentCard onDailyReview={() => setShowDailyReview(true)} />
       <ThisWeekSummary
         episodes={episodes}
         supabase={supabase}

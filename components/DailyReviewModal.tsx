@@ -1,5 +1,7 @@
 'use client'
 
+import Link from 'next/link'
+import { activeMinutes } from '@/lib/work-time'
 import type { Episode } from '@/lib/types'
 
 type Props = {
@@ -35,14 +37,14 @@ export default function DailyReviewModal({ episodes, onDismiss }: Props) {
 
   for (const ep of todayEps) {
     if (ep.work_type === 'administrative') {
-      adminMinutes += ep.duration_minutes ?? 0
+      adminMinutes += activeMinutes(ep)
     } else {
       const k = (ep.case_name?.trim() || 'Unknown').toLowerCase().replace(/\s+/g, ' ')
       if (projectMap[k]) {
-        projectMap[k].minutes += ep.duration_minutes ?? 0
+        projectMap[k].minutes += activeMinutes(ep)
       } else {
         projectMap[k] = {
-          minutes: ep.duration_minutes ?? 0,
+          minutes: activeMinutes(ep),
           displayName: ep.case_name?.trim() || 'Unknown',
         }
       }
@@ -110,6 +112,7 @@ export default function DailyReviewModal({ episodes, onDismiss }: Props) {
           </p>
         )}
 
+        <Link href="/observations" className="block text-center underline text-sm mb-4">Review and approve today’s observations</Link>
         <button
           onClick={onDismiss}
           className="w-full bg-neutral-900 text-white text-sm font-medium py-2.5 rounded-lg hover:bg-neutral-700 transition-colors"

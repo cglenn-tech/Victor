@@ -24,7 +24,7 @@ function mockUpdateChain() {
   const updateFn = vi.fn().mockReturnValue({ eq: eqFn })
   vi.mocked(getAdminClient).mockReturnValue({
     from: vi.fn().mockReturnValue({ update: updateFn }),
-  } as ReturnType<typeof getAdminClient>)
+  } as unknown as ReturnType<typeof getAdminClient>)
   return { updateFn, eqFn }
 }
 
@@ -82,7 +82,7 @@ describe('GET /api/realtime/token', () => {
     expect(body.device_id).toBe(DEVICE.id)
     expect(body.installation_id).toBe(DEVICE.installation_id)
     expect(typeof body.access_token).toBe('string')
-    expect(body.expires_in).toBe(86400)
+    expect(body.expires_in).toBe(900)
     expect(body.supabase_url).toBe('https://test.supabase.co')
     expect(body.anon_key).toBe('test-anon-key')
   })

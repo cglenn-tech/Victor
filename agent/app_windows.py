@@ -196,7 +196,7 @@ if __name__ == '__main__':
     # is passed as a positional argument by the Windows shell handler.
     _proto_url = None
     for _arg in sys.argv[1:]:
-        if _arg.startswith('buildharvey://'):
+        if _arg.startswith(('buildharvey://', 'victor://')):
             _proto_url = _arg
             break
 
@@ -205,7 +205,7 @@ if __name__ == '__main__':
         _parsed = _urlparse(_proto_url)
         if _parsed.netloc == 'reconnect':
             # Force re-activation on next launch by clearing stored credential
-            auth.delete_credential()
+            auth.disconnect()
         elif _parsed.netloc == 'disconnect':
             auth.disconnect()
             sys.exit(0)

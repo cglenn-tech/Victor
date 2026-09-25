@@ -1,14 +1,10 @@
 """
 Self-hosted model client — the ONLY model caller in the agent.
 
-OpenAI-compatible chat completions endpoint, fully configured via
-environment variables (see config.py):
-    SELF_HOSTED_MODEL_URL    base URL, e.g. https://<pod>.runpod.ai/v2/<id>/openai/v1
-    SELF_HOSTED_MODEL_NAME   model id served by the endpoint
-    SELF_HOSTED_API_KEY      bearer token
-
-There is no cloud path and no local/on-device fork — the entire product
-is private. Swapping backends only requires changing these env vars.
+The desktop authenticates to Victor with its device token. The web server
+owns SELF_HOSTED_MODEL_URL / SELF_HOSTED_MODEL_NAME / SELF_HOSTED_API_KEY.
+Screenshots pass transiently through that authenticated backend to the configured
+model. They are not uploaded to Supabase Storage.
 
 Reliability:
   - Retries with exponential backoff on network errors, timeouts, 429 and 5xx.
@@ -32,8 +28,16 @@ class ModelNotConfiguredError(RuntimeError):
     """Raised when the self-hosted endpoint is not configured via env."""
 
 
+_session = __import__('threading').local()
+
+
+def bind_session(owner: str, token: str) -> None:
+    _session.owner, _session.token = owner, token
+
+
 def is_configured() -> bool:
-    return bool(config.SELF_HOSTED_MODEL_URL and config.SELF_HOSTED_MODEL_NAME and config.SELF_HOSTED_API_KEY)
+    import auth
+    return bool(auth.read_credential() and auth.read_user_id())
 
 
 def chat_completion(
@@ -49,13 +53,13 @@ def chat_completion(
         log.warning("model_client.not_configured")
         return None
 
-    url = config.SELF_HOSTED_MODEL_URL.rstrip("/") + "/chat/completions"
-    payload = json.dumps({
-        "model": config.SELF_HOSTED_MODEL_NAME,
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-    }).encode()
+    import auth
+    token = getattr(_session, 'token', None)
+    owner = getattr(_session, 'owner', None)
+    if not token or token != auth.read_credential() or owner != auth.read_user_id():
+        return None
+    url = config.BASE_URL.rstrip("/") + "/api/agent/analyze"
+    payload = json.dumps({"messages": messages}).encode()
 
     last_error = ""
     for attempt in range(config.MODEL_MAX_RETRIES + 1):
@@ -63,18 +67,20 @@ def chat_completion(
             backoff = min(2 ** attempt, 30) + (attempt * 0.5)
             time.sleep(backoff)
 
+        if token != auth.read_credential() or owner != auth.read_user_id():
+            return None
         req = urllib.request.Request(
             url,
             data=payload,
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {config.SELF_HOSTED_API_KEY}",
+                "Authorization": f"Bearer {token}",
             },
             method="POST",
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=config.MODEL_TIMEOUT_SECONDS) as resp:
+            with urllib.request.urlopen(req, timeout=55) as resp:
                 result = json.loads(resp.read())
             content = result["choices"][0]["message"]["content"]
             if isinstance(content, list):

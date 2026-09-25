@@ -13,6 +13,7 @@ export async function GET() {
     .from('observations')
     .select('*')
     .eq('user_id', user.id)
+    .is('deleted_at', null)
     .order('observed_at', { ascending: false })
 
   if (error) {

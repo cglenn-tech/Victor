@@ -10,14 +10,15 @@ Loop:
   3. Screenshots accumulate into batches (~5). A full batch is sent as ONE
      request to the self-hosted vision model (model_client), which returns one
      structured observation. Episodes are grouped around observations
-     (2-signal hysteresis).
+     using explicit matter identity.
   4. If no screenshot or server returns None: update metadata context only.
   5. On episode close: finalize → persist to SQLite → enqueue server sync.
   6. On session end: broadcast daily_review so the web dashboard shows the modal.
 
 Session gate:
   - Recording begins when the user clicks Start on buildharvey.com (Realtime).
-  - A browser refresh or closure does NOT stop recording.
+  - All browser tabs closing expires the server lease after 10 minutes.
+  - Sign-out and network failures stop capture at the next session check.
   - Active episode is finalized on Stop.
 
 Phase 1 (ENABLE_CAPTURE_LEASES=true):
@@ -45,6 +46,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import config
+import auth
 import database
 import finalizer
 import model_client
@@ -70,9 +72,17 @@ def main(
     except Exception:
         pass
 
+    owner, token = auth.read_user_id(), auth.read_credential()
+    if not owner or not token:
+        return
+    try:
+        auth._api_bearer('/api/device/heartbeat', token, method='POST')
+    except Exception:
+        return  # cannot establish a fresh paused session
+    model_client.bind_session(owner, token)
     realtime_client.start()
 
-    conn = database.connect()
+    conn = database.connect(owner)
 
     # Crash safety: check for dirty shutdown BEFORE marking current startup dirty.
     # Order matters: read the previous value first, then overwrite with dirty.
@@ -101,6 +111,7 @@ def main(
         if invalidated:
             consent_manager.begin_batch_reconsent(invalidated)
 
+    observer.reset()
     engine = EpisodeEngine()
     batcher = vision.ObservationBatcher()
     sync.start()
@@ -112,19 +123,26 @@ def main(
     for ob in database.get_unsynced_observations(conn):
         sync.enqueue_observation(ob)
     if not model_client.is_configured():
-        print("[agent] WARNING: self-hosted model not configured — "
-              "set SELF_HOSTED_MODEL_URL / SELF_HOSTED_MODEL_NAME / SELF_HOSTED_API_KEY")
+        print("[agent] WARNING: desktop is not linked — "
+              "sign in and connect this device")
 
     _ws_state = 'idle'                  # tracks last state broadcast to realtime_client
     _open_gap_id: Optional[str] = None  # current open ObservationGap (if any)
 
     while True:
+        if auth.read_user_id() != owner or auth.read_credential() != token:
+            # In-flight results belong to the original account; never flush them
+            # using a replacement token. Persist already-analyzed work locally.
+            batcher.discard()
+            closed = engine.force_close_active()
+            if closed:
+                _close_and_save(conn, closed)
+            break
         if stop_event is not None and stop_event.is_set():
             print("[agent] stop_event set — shutting down")
             _flush_batcher(conn, engine, batcher)
             if engine.active:
-                engine.active.close()
-                _close_and_save(conn, engine.active)
+                _close_and_save(conn, engine.force_close_active())
             if _open_gap_id:
                 database.close_gap(conn, _open_gap_id)
             database.mark_clean_shutdown(conn)
@@ -149,25 +167,23 @@ def main(
                 # No active work session — flush any pending batch, finalize and idle
                 _flush_batcher(conn, engine, batcher)
                 if engine.active:
-                    engine.active.close()
-                    _close_and_save(conn, engine.active)
-                    engine.active = None
+                    _close_and_save(conn, engine.force_close_active())
                     realtime_client.broadcast_daily_review()   # notify web to show review modal
                 if _open_gap_id:
                     database.close_gap(conn, _open_gap_id)
                     _open_gap_id = None
                 if _ws_state != 'idle':
+                    observer.reset()
                     realtime_client.set_status('idle')
                     _ws_state = 'idle'
                 if state_callback:
                     state_callback('idle')
-                time.sleep(30)   # check every 30s while idle
+                time.sleep(1)
         except KeyboardInterrupt:
             print("\n[agent] shutting down")
             _flush_batcher(conn, engine, batcher)
             if engine.active:
-                engine.active.close()
-                _close_and_save(conn, engine.active)
+                _close_and_save(conn, engine.force_close_active())
             if _open_gap_id:
                 database.close_gap(conn, _open_gap_id)
             database.mark_clean_shutdown(conn)
@@ -175,6 +191,10 @@ def main(
         except Exception:
             traceback.print_exc()
             time.sleep(config.CAPTURE_INTERVAL_SECONDS)
+
+    batcher.discard()
+    observer.reset()
+    conn.close()
 
 
 def _cycle(
@@ -197,6 +217,8 @@ def _cycle(
         if open_gap_id is None:
             prev_ep_id = engine.active.id if engine.active else None
             open_gap_id = database.open_gap(conn, "window_not_consented", prev_ep_id)
+        if engine.active:
+            engine.active.pause_timing()
         return open_gap_id
 
     # ── Close any open gap when capture resumes ───────────────────────────────
@@ -207,11 +229,16 @@ def _cycle(
 
     # Filter out system/agent observations before they reach the Episode Engine
     if obs is not None and not observer.is_user_work(obs):
+        if obs.screenshot_path:
+            from pathlib import Path
+            Path(obs.screenshot_path).unlink(missing_ok=True)
         obs = None
 
     if obs is None:
         # No screen change (or filtered) — update activity timestamp, check inactivity
-        engine.ingest_metadata_activity_only()
+        so = batcher.maybe_idle_flush()
+        if so is not None:
+            _handle_observation(conn, engine, so)
         closed = engine.check_inactivity(now)
         if closed:
             _close_and_save(conn, closed)
@@ -223,6 +250,9 @@ def _cycle(
         so = batcher.add(obs)
         if so is not None:
             _handle_observation(conn, engine, so)
+            realtime_client.set_status('recording')
+        elif batcher.last_error:
+            realtime_client.set_status('error')
     else:
         # Metadata path: track context only, never open/close episodes
         engine.ingest_metadata(obs)
@@ -243,17 +273,14 @@ def _cycle(
 def _handle_observation(conn, engine: EpisodeEngine, so) -> None:
     """Persist + sync a completed observation, then group it into an episode."""
     result = engine.ingest_observation(so)
-    episode_id = engine.active.id if engine.active else None
-    obs_dict = so.to_dict(episode_id=episode_id)
-    try:
-        database.save_observation(conn, obs_dict)
-    except Exception:
-        # Local persistence failed — still enqueue so the server (the durable
-        # Observation Log) receives it. Log loudly, never crash the loop.
-        traceback.print_exc()
-    sync.enqueue_observation(obs_dict)
     if result and result.closed_episode:
         _close_and_save(conn, result.closed_episode)
+    if not engine.active:
+        return
+    # Persist a current parent snapshot before its child. Both survive crashes.
+    _close_and_save(conn, engine.active)
+    database.save_observation(conn, so.to_dict(episode_id=engine.active.id))
+    sync.enqueue_observation({})
 
 
 def _flush_batcher(conn, engine: EpisodeEngine, batcher) -> None:
@@ -272,13 +299,7 @@ def _close_and_save(conn, episode: Episode) -> None:
         return
     finalizer.finalize(episode)
 
-    if episode.duration_minutes < config.MIN_EPISODE_DURATION_MINUTES:
-        print(
-            f"[agent] discarded '{episode.case_name}' "
-            f"({episode.duration_minutes:.1f}min — below minimum)"
-        )
-        return
-
+    # Short observations are still durable and reviewable.
     # Read classification metadata set by finalizer
     activity_class = getattr(episode, "_activity_classification", None)
     class_confidence = getattr(episode, "_classification_confidence", None)

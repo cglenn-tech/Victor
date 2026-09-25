@@ -156,12 +156,26 @@ def _migrate_plaintext_to_encrypted(db_path: Path, key: str) -> None:
         ) from exc
 
 
-def connect():
+def account_db_path(owner_id: Optional[str] = None) -> Path:
+    """Never attribute the legacy, unowned database to a newly linked account."""
+    import hashlib
+    if owner_id is None:
+        import auth
+        owner_id = auth.read_user_id()
+    if not owner_id:
+        return Path(config.DB_PATH)  # offline legacy tools only; sync requires an owner
+    account = hashlib.sha256(owner_id.encode()).hexdigest()
+    path = Path(config.DB_PATH).parent / "accounts" / account / "victor.db"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def connect(owner_id: Optional[str] = None):
     """Return a database connection.  In PRIVATE_MODE returns an _APSWCompatWrapper
     (apsw-backed, encrypted); otherwise returns a plain sqlite3.Connection."""
     if config.PRIVATE_MODE:
-        return _connect_encrypted()
-    conn = sqlite3.connect(str(config.DB_PATH))
+        return _connect_encrypted(account_db_path(owner_id))
+    conn = sqlite3.connect(str(account_db_path(owner_id)))
     # WAL mode: allows concurrent reads while writing, survives crashes cleanly.
     conn.execute('PRAGMA journal_mode=WAL')
     conn.execute('PRAGMA synchronous=NORMAL')
@@ -169,7 +183,7 @@ def connect():
     return conn
 
 
-def _connect_encrypted() -> '_APSWCompatWrapper':
+def _connect_encrypted(db_path=None) -> '_APSWCompatWrapper':
     """
     Open (or create) an encrypted SQLite database using apsw-sqlite3mc.
 
@@ -195,7 +209,7 @@ def _connect_encrypted() -> '_APSWCompatWrapper':
         ) from exc
 
     key = _get_or_create_keychain_key()
-    db_path = Path(str(config.DB_PATH))
+    db_path = Path(db_path) if db_path is not None else account_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     state = _detect_db_state(db_path)
@@ -217,6 +231,7 @@ def _connect_encrypted() -> '_APSWCompatWrapper':
             "The key may be incorrect or the database may be corrupted."
         ) from exc
 
+    conn.set_busy_timeout(5000)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA temp_store=MEMORY")
@@ -399,8 +414,8 @@ def save_episode(
         INSERT INTO episodes
             (id, case_name, issue_worked_on, work_type, started_at, ended_at,
              duration_minutes, active_seconds, key_observations, created_at, is_reportable,
-             activity_classification, classification_confidence, has_inference_failure)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+             activity_classification, classification_confidence, has_inference_failure, observation_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             case_name                = excluded.case_name,
             issue_worked_on          = excluded.issue_worked_on,
@@ -411,14 +426,17 @@ def save_episode(
             key_observations         = excluded.key_observations,
             activity_classification  = excluded.activity_classification,
             classification_confidence = excluded.classification_confidence,
-            has_inference_failure    = excluded.has_inference_failure
+            has_inference_failure    = excluded.has_inference_failure,
+            observation_count = excluded.observation_count,
+            synced_at = NULL,
+            sync_version = episodes.sync_version + 1
     """, (
         d["id"], d["case_name"], d.get("issue_worked_on"), d.get("work_type", "project"),
         d["started_at"], d["ended_at"],
         d["duration_minutes"], d.get("active_seconds"),
         json.dumps(d["key_observations"]), d["created_at"],
         activity_classification, classification_confidence,
-        1 if has_inference_failure else 0,
+        1 if has_inference_failure else 0, d.get("observation_count", 0),
     ))
     conn.commit()
 
@@ -427,10 +445,10 @@ def save_episode(
         upsert_recent_context(conn, d["case_name"], d.get("issue_worked_on"), d.get("work_type", "project"))
 
 
-def mark_synced(conn: sqlite3.Connection, episode_id: str) -> None:
+def mark_synced(conn: sqlite3.Connection, episode_id: str, revision: int = 0) -> None:
     conn.execute(
-        "UPDATE episodes SET synced_at = ? WHERE id = ?",
-        (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), episode_id),
+        "UPDATE episodes SET synced_at = ? WHERE id = ? AND sync_version = ?",
+        (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), episode_id, revision),
     )
     conn.commit()
 
@@ -467,7 +485,7 @@ def mark_invalid_episodes(conn: sqlite3.Connection) -> list[str]:
 
     placeholders = ",".join("?" * len(ids))
     conn.execute(
-        f"UPDATE episodes SET is_reportable = 0 WHERE id IN ({placeholders})",
+        f"UPDATE episodes SET is_reportable = 0, synced_at = NULL, sync_version = sync_version + 1 WHERE id IN ({placeholders})",
         ids,
     )
     conn.commit()
@@ -749,13 +767,17 @@ def _migrate_episodes(conn: sqlite3.Connection) -> None:
                 is_reportable            INTEGER NOT NULL DEFAULT 1,
                 activity_classification  TEXT,
                 classification_confidence REAL,
-                has_inference_failure    INTEGER NOT NULL DEFAULT 0
+                has_inference_failure    INTEGER NOT NULL DEFAULT 0,
+                sync_version             INTEGER NOT NULL DEFAULT 0,
+                observation_count        INTEGER NOT NULL DEFAULT 0
             )
         """)
         conn.commit()
     else:
         # Add missing columns to existing installations
         for col, ddl in [
+            ("sync_version", "ALTER TABLE episodes ADD COLUMN sync_version INTEGER NOT NULL DEFAULT 0"),
+            ("observation_count", "ALTER TABLE episodes ADD COLUMN observation_count INTEGER NOT NULL DEFAULT 0"),
             ("is_reportable",            "ALTER TABLE episodes ADD COLUMN is_reportable INTEGER NOT NULL DEFAULT 1"),
             ("issue_worked_on",          "ALTER TABLE episodes ADD COLUMN issue_worked_on TEXT"),
             ("work_type",                "ALTER TABLE episodes ADD COLUMN work_type TEXT NOT NULL DEFAULT 'project'"),
@@ -860,7 +882,7 @@ def save_observation(conn: sqlite3.Connection, obs: dict) -> None:
     """Persist one structured observation (idempotent by id)."""
     conn.execute(
         """
-        INSERT OR REPLACE INTO observations (
+        INSERT OR IGNORE INTO observations (
             id, episode_id, title, summary, observed_at, start_time, end_time,
             applications, entities, activity_type, is_approved, created_at, synced_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
@@ -918,7 +940,7 @@ def get_unsynced_episodes(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
         """
         SELECT id, case_name, issue_worked_on, work_type, started_at, ended_at,
-               duration_minutes, active_seconds, key_observations, created_at
+               duration_minutes, active_seconds, key_observations, created_at, sync_version, is_reportable, observation_count
         FROM episodes WHERE synced_at IS NULL
         """
     ).fetchall()
@@ -929,6 +951,8 @@ def get_unsynced_episodes(conn: sqlite3.Connection) -> list[dict]:
             "duration_minutes": r[6], "active_seconds": r[7],
             "key_observations": json.loads(r[8] or "[]"),
             "created_at": r[9], "evidence_paths": [],
+            "agent_revision": r[10], "is_reportable": bool(r[11]),
+            "observation_count": r[12],
         }
         for r in rows
     ]

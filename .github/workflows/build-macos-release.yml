@@ -6,7 +6,7 @@ on:
       version:
         description: "Release version (for example 0.1.1)"
         required: true
-        default: "0.1.1"
+        default: "1.1.0"
   push:
     branches:
       - main
@@ -50,7 +50,7 @@ jobs:
           elif [[ -n "${{ inputs.version }}" ]]; then
             VERSION="${{ inputs.version }}"
           else
-            VERSION="0.1.1"
+            VERSION="1.1.0"
           fi
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "tag=v${VERSION}" >> "${GITHUB_OUTPUT}"

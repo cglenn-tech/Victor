@@ -27,13 +27,12 @@ export async function GET(request: Request) {
     return Response.json({ error: 'Server misconfiguration' }, { status: 500 })
   }
 
-  // Fire-and-forget last_seen_at update — don't block token response
-  getAdminClient()
+  await getAdminClient()
     .from('devices')
     .update({ last_seen_at: new Date().toISOString() })
     .eq('id', device.id)
 
-  const expiresIn = 86400 // 24 hours
+  const expiresIn = 900 // 15 minutes
   const accessToken = signSupabaseJwt(device.user_id, jwtSecret, expiresIn)
 
   return Response.json({

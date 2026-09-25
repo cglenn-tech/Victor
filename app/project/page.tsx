@@ -1,3 +1,4 @@
+import { activeMinutes } from '@/lib/work-time'
 import { redirect } from 'next/navigation'
 import { getServerClient } from '@/lib/supabase-server'
 import { getAdminClient } from '@/lib/supabase-admin'
@@ -74,6 +75,7 @@ export default async function ProjectPage({
     .from('episodes')
     .select('*')
     .eq('user_id', user.id)
+    .is('deleted_at', null)
     .eq('case_name', projectName)
     .eq('is_reportable', true)
     .order('started_at', { ascending: true })
@@ -95,7 +97,7 @@ export default async function ProjectPage({
     )
   }
 
-  const totalMinutes = episodes.reduce((sum, ep) => sum + (ep.duration_minutes ?? 0), 0)
+  const totalMinutes = episodes.reduce((sum, ep) => sum + (activeMinutes(ep)), 0)
 
   // Group by day (UTC date key)
   const dayMap = new Map<string, Episode[]>()
@@ -146,7 +148,7 @@ export default async function ProjectPage({
                   {/* Time range + duration */}
                   <p className="text-xs text-neutral-400 mb-1">
                     {fmtUtcTime(ep.started_at)} &ndash; {fmtUtcTime(ep.ended_at)}{' '}
-                    &middot; {fmtDur(ep.duration_minutes)}
+                    &middot; {fmtDur(activeMinutes(ep))}
                     {fmtActiveSec(ep.active_seconds) && (
                       <span className="ml-2 text-neutral-300">
                         ({fmtActiveSec(ep.active_seconds)})

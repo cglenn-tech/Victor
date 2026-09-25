@@ -85,6 +85,7 @@ class StructuredObservation:
     applications: list[str]
     entities: list[str]
     activity_type: str
+    matter: str = ""  # explicit client + matter identity, never inferred from an app
 
     def to_dict(self, episode_id: Optional[str] = None) -> dict:
         return {
@@ -179,13 +180,7 @@ class Episode:
 
     @property
     def duration_minutes(self) -> float:
-        end_str = self.ended_at or _iso_now()
-        try:
-            start = time.mktime(time.strptime(self.started_at, "%Y-%m-%dT%H:%M:%SZ"))
-            end = time.mktime(time.strptime(end_str, "%Y-%m-%dT%H:%M:%SZ"))
-            return round((end - start) / 60, 2)
-        except Exception:
-            return 0.0
+        return round(self.active_seconds / 60, 2)
 
     @property
     def active_seconds(self) -> float:
@@ -207,13 +202,13 @@ class Episode:
         except Exception:
             return 0.0
 
-    def pause_timing(self) -> None:
+    def pause_timing(self, at: Optional[float] = None) -> None:
         """
         Record the start of a pause.
         Called when idle threshold is reached. No-op if already paused.
         """
         if not self._is_paused:
-            self._pause_started_at = time.time()
+            self._pause_started_at = time.time() if at is None else at
             self._is_paused = True
 
     def resume_timing(self) -> None:
@@ -230,7 +225,8 @@ class Episode:
     def add_structured_observation(self, so: StructuredObservation) -> None:
         """Attach a completed model observation to this episode."""
         self._structured_observations.append(so)
-        self.last_user_activity_at = time.time()
+        self.resume_timing()
+        self.last_user_activity_at = calendar.timegm(time.strptime(so.end_time, "%Y-%m-%dT%H:%M:%SZ"))
         self.last_meaningful_evidence_at = time.time()
 
     def add_raw_observation(self, obs) -> None:
@@ -254,10 +250,10 @@ class Episode:
         """Compatibility shim — delegates to add_raw_observation."""
         self.add_raw_observation(obs)
 
-    def close(self) -> None:
+    def close(self, at: Optional[str] = None) -> None:
         if self._is_paused:
             self.resume_timing()
-        self.ended_at = _iso_now()
+        self.ended_at = at or _iso_now()
 
     def to_dict(self) -> dict:
         """
@@ -277,6 +273,7 @@ class Episode:
             "active_seconds": round(self.active_seconds, 1),
             "key_observations": [o.to_dict() for o in self.key_observations],
             "created_at": self.created_at,
+            "observation_count": len(self._structured_observations),
             "evidence_paths": list(self.evidence_paths),
         }
 

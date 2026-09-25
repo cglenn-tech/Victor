@@ -185,6 +185,7 @@ def disconnect() -> bool:
     delete_credential()
     try:
         _adapter.delete_credential(account='device-id')
+        _adapter.delete_credential(account='user-id')
     except Exception:
         pass
     return True

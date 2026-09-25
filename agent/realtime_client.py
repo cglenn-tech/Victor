@@ -1,33 +1,9 @@
-"""
-Supabase Realtime relay for BuildHarvey.
+"""Private per-device Realtime status relay.
 
-Replaces the local WebSocket session_server. Both the browser and the agent
-connect outward to Supabase Realtime on the channel:
-  buildharvey:device:<device_id>
-
-Local (desktop) controls — primary:
-  start_local()  → agent begins recording without requiring the browser
-  stop_local()   → agent stops recording regardless of browser state
-
-Browser controls — secondary (optional):
-  Browser → Realtime broadcast "start" → agent begins recording.
-  Browser → Realtime broadcast "stop"  → agent stops recording.
-
-Agent   → Realtime broadcast "status" (state) → browser updates UI.
-Agent   → Realtime presence {type:"agent"} → browser knows agent is alive.
-
-Threading model:
-  Main thread (sync):  main.py calls is_recording_active(), set_status(), force_stop().
-  Realtime thread:     asyncio event loop handles Supabase WebSocket connection.
-  Cross-thread:        threading.Event for recording gate, run_coroutine_threadsafe
-                       for broadcasts.
-
-Grace period:
-  When the last browser leaves presence, a 10-minute timer starts.
-  If a browser returns, the timer cancels and the session resumes.
-  If 10 minutes pass AND recording was started from the browser (not locally),
-  recording stops and the agent idles.
-  Local recording is unaffected by browser presence.
+The authenticated heartbeat endpoint is authoritative for capture permission.
+Browser Start/Stop commands are persisted before broadcast. Sign-out stops the
+session; browser absence expires it after ten minutes. Desktop Start opens the
+dashboard. The relay reconnects on token expiry or account changes.
 """
 import asyncio
 import json
@@ -53,6 +29,10 @@ _event_loop: Optional[asyncio.AbstractEventLoop] = None
 _channel = None          # AsyncRealtimeChannel — set from async thread
 _grace_timer: Optional[threading.Timer] = None
 _credentials: Optional[dict] = None
+_thread = None
+_credentials_token = None
+_last_session_check = 0.0
+_server_allowed = False
 
 
 # ── Credential management ─────────────────────────────────────────────────────
@@ -114,16 +94,9 @@ def _grace_period_expired() -> None:
 # ── Local recording controls (primary) ────────────────────────────────────────
 
 def start_local() -> None:
-    """
-    Start recording from the desktop UI.
-    Does not require a browser to be present or connected.
-    """
-    global _local_recording
-    with _lock:
-        _local_recording = True
-    _recording_event.set()
-    print("[realtime] local recording started")
-    set_status('recording')
+    """Capture starts only from an authenticated browser session."""
+    from browser_open import open_url
+    open_url(config.BASE_URL)
 
 
 def stop_local() -> None:
@@ -135,23 +108,29 @@ def stop_local() -> None:
     with _lock:
         _local_recording = False
     _recording_event.clear()
+    try:
+        token = auth.read_credential()
+        if token:
+            auth._api_bearer('/api/device/heartbeat', token, method='POST')
+    except Exception:
+        pass
     print("[realtime] local recording stopped")
 
 
 # ── Public API (called from main thread) ──────────────────────────────────────
 
 def is_recording_active() -> bool:
-    """
-    True when a work session is active.
-
-    Recording is active if:
-    - The desktop UI started recording locally (no browser required), OR
-    - A browser sent 'start' AND the browser is still present.
-    """
-    with _lock:
-        if _local_recording:
-            return _recording_event.is_set()
-        return _recording_event.is_set() and _browser_present
+    """Server lease is authoritative. Network failures pause capture."""
+    global _last_session_check, _server_allowed
+    now = time.monotonic()
+    if now - _last_session_check >= 5:
+        _last_session_check = now
+        _server_allowed = _call_heartbeat()
+        if _server_allowed:
+            _recording_event.set()
+        else:
+            _recording_event.clear()
+    return _server_allowed and _recording_event.is_set()
 
 
 def set_status(state: str) -> None:
@@ -183,7 +162,8 @@ def force_stop() -> None:
     Immediately stop recording. Called on OS sleep, logout, or user switch.
     Does not attempt to broadcast (Realtime connection likely dropped anyway).
     """
-    global _browser_present, _local_recording
+    global _browser_present, _local_recording, _current_state, _server_allowed
+    _server_allowed = False
     _cancel_grace_timer()
     _recording_event.clear()
     with _lock:
@@ -193,14 +173,17 @@ def force_stop() -> None:
 
 
 def start() -> None:
-    """Start the Realtime client in a background daemon thread."""
+    """Start one relay thread; reconnect when account credentials change."""
+    global _thread
+    if _thread and _thread.is_alive():
+        return
     try:
         import realtime  # noqa: F401 — verify package is installed
     except ImportError:
         print("[realtime] WARNING: 'realtime' package not installed — browser control disabled")
         return
-    t = threading.Thread(target=_run, name='realtime-client', daemon=True)
-    t.start()
+    _thread = threading.Thread(target=_run, name='realtime-client', daemon=True)
+    _thread.start()
 
 
 # ── Async broadcast helper ────────────────────────────────────────────────────
@@ -246,19 +229,23 @@ async def _connect_loop() -> None:
 
 async def _connect_once() -> None:
     """Fetch credentials, open channel, run until token near-expiry or error."""
-    global _channel, _credentials, _browser_present
+    global _channel, _credentials, _browser_present, _credentials_token
 
     from realtime import AsyncRealtimeClient
 
     # ── Credentials ───────────────────────────────────────────────────────────
+    connection_token = auth.read_credential()
     creds = _credentials
-    if creds is None or time.time() > creds['expires_at'] - 300:
+    if creds is None or _credentials_token != connection_token or time.time() > creds['expires_at'] - 300:
         creds = _fetch_credentials()
         if creds is None:
             print("[realtime] could not obtain credentials — retrying in 30 s")
             await asyncio.sleep(30)
             return
+        if auth.read_credential() != connection_token:
+            return
         _credentials = creds
+        _credentials_token = connection_token
 
     supabase_url: str = creds['supabase_url']
     access_token: str = creds['access_token']
@@ -290,7 +277,8 @@ async def _connect_once() -> None:
 
     async def on_start(payload, ref=None, join_ref=None):
         print("[realtime] ← start (browser)")
-        _recording_event.set()
+        global _last_session_check
+        _last_session_check = 0
         # main.py broadcasts 'recording' once capture actually starts
 
     async def on_stop(payload, ref=None, join_ref=None):
@@ -395,7 +383,10 @@ async def _connect_once() -> None:
 
     sleep_seconds = max(0.0, expires_at - time.time() - 300)
     print(f"[realtime] will refresh token in {sleep_seconds / 3600:.1f} h")
-    await asyncio.sleep(sleep_seconds)
+    deadline = time.time() + sleep_seconds
+    while time.time() < deadline and auth.read_credential() == connection_token:
+        await asyncio.sleep(1)
+    force_stop()
 
     # Clean up before reconnect
     track_task.cancel()
@@ -409,19 +400,21 @@ async def _connect_once() -> None:
         pass
 
 
-def _call_heartbeat() -> None:
-    """Send heartbeat to /api/device/heartbeat (best-effort, sync)."""
+def _call_heartbeat() -> bool:
     token = auth.read_credential()
     if not token:
-        return
-    url = f"{config.BASE_URL}/api/device/heartbeat"
+        return False
     req = urllib.request.Request(
-        url,
-        headers={'Authorization': f'Bearer {token}'},
-        method='GET',
+        f"{config.BASE_URL}/api/device/heartbeat",
+        headers={'Authorization': f'Bearer {token}'}, method='GET',
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            resp.read()
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+        if data.get('user_id') != auth.read_user_id() or token != auth.read_credential():
+            return False
+        if data.get('device_id'):
+            auth.store_device_id(data['device_id'])
+        return data.get('recording_allowed') is True
     except Exception:
-        pass
+        return False

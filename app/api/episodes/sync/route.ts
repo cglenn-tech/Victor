@@ -1,51 +1,23 @@
-import { createHash } from 'crypto'
-import type { NextRequest } from 'next/server'
+import { getDeviceFromToken } from '@/lib/device-auth'
 import { getAdminClient } from '@/lib/supabase-admin'
+import { episodePayload, record } from '@/lib/agent-payload'
 
-async function getDeviceFromToken(authHeader: string | null) {
-  if (!authHeader?.startsWith('Bearer ')) return null
-  const rawToken = authHeader.slice(7)
-  const tokenHash = createHash('sha256').update(rawToken).digest('hex')
-
-  const admin = getAdminClient()
-  const { data: device } = await admin
-    .from('devices')
-    .select('id, user_id')
-    .eq('token_hash', tokenHash)
-    .is('revoked_at', null)
-    .single()
-
-  if (!device) return null
-
-  // Update last_seen_at (fire-and-forget)
-  admin.from('devices').update({ last_seen_at: new Date().toISOString() }).eq('id', device.id)
-
-  return device
-}
-
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   const device = await getDeviceFromToken(request.headers.get('authorization'))
-  if (!device) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  let episode: Record<string, unknown>
+  if (!device) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  let args
   try {
-    episode = await request.json()
+    const payload = episodePayload(await request.json())
+    args = { p_device_id: device.id, p_user_id: device.user_id, p_episode: payload }
   } catch {
-    return Response.json({ error: 'Invalid JSON' }, { status: 400 })
+    return Response.json({ error: 'Invalid episodes payload' }, { status: 400 })
   }
-
   const admin = getAdminClient()
-  const { error } = await admin.from('episodes').upsert({
-    ...episode,
-    user_id: device.user_id,
-    device_id: device.id,
-  })
-
+  const { error } = await admin.rpc('sync_agent_episode', args)
   if (error) {
-    return Response.json({ error: error.message }, { status: 500 })
+    const status = error.code === '42501' ? 403 : error.code === '23503' ? 409 : 500
+    return Response.json({ error: status === 409 ? 'Episode must sync first' : 'Unable to sync episodes' }, { status })
   }
-
+  await admin.from('devices').update({ last_seen_at: new Date().toISOString() }).eq('id', device.id)
   return Response.json({ ok: true })
 }

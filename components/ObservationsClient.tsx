@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { localDate } from '@/lib/work-time'
 import type { Observation } from '@/lib/types'
 
 type DayGroup = {
@@ -10,15 +11,15 @@ type DayGroup = {
 }
 
 function dayKey(iso: string): string {
-  return iso.slice(0, 10)
+  return localDate(new Date(iso))
 }
 
 function dayLabel(dateKey: string): string {
-  const today = new Date().toISOString().slice(0, 10)
-  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+  const today = localDate(new Date())
+  const yesterday = localDate(new Date(Date.now() - 86_400_000))
   if (dateKey === today) return 'Today'
   if (dateKey === yesterday) return 'Yesterday'
-  return new Date(dateKey + 'T12:00:00Z').toLocaleDateString('en-US', {
+  return new Date(dateKey + 'T12:00:00').toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
@@ -56,6 +57,7 @@ function ObservationRow({
   onUpdate: (id: string, patch: Partial<Observation>) => void
   onDelete: (id: string) => void
 }) {
+  const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
   const [editing, setEditing] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -65,6 +67,7 @@ function ObservationRow({
 
   async function save() {
     setSaving(true)
+    setError(null)
     try {
       const res = await fetch(`/api/observations/${observation.id}`, {
         method: 'PATCH',
@@ -72,38 +75,41 @@ function ObservationRow({
         body: JSON.stringify({ title, summary }),
       })
       if (res.ok) {
-        onUpdate(observation.id, { title, summary })
+        const data = await res.json()
+        onUpdate(observation.id, data.observation)
         setEditing(false)
-      }
+      } else throw new Error('Unable to save this observation')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to save')
     } finally {
       setSaving(false)
     }
   }
 
   async function toggleApprove() {
-    const next = !observation.is_approved
-    onUpdate(observation.id, { is_approved: next })
-    const res = await fetch(`/api/observations/${observation.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_approved: next }),
-    })
-    if (!res.ok) onUpdate(observation.id, { is_approved: !next })
+    setError(null)
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/observations/${observation.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_approved: !observation.is_approved }) })
+      if (!res.ok) throw new Error('Unable to update approval')
+      onUpdate(observation.id, (await res.json()).observation)
+    } catch (err) { setError(err instanceof Error ? err.message : 'Unable to approve') }
+    finally { setSaving(false) }
   }
 
   async function remove() {
-    if (!deleting) {
-      setDeleting(true)
-      return
-    }
-    setDeleting(true)
-    const res = await fetch(`/api/observations/${observation.id}`, { method: 'DELETE' })
-    if (res.ok) onDelete(observation.id)
+    if (!deleting) { setDeleting(true); return }
+    setError(null)
+    try {
+      const res = await fetch(`/api/observations/${observation.id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Unable to delete this observation')
+      onDelete(observation.id)
+    } catch (err) { setError(err instanceof Error ? err.message : 'Unable to delete') }
   }
 
   return (
     <div className="border border-neutral-100 rounded-lg p-4 flex gap-4">
-      <div className="w-40 shrink-0">
+      {observation.screenshot_path && <div className="w-40 shrink-0">
         {observation.screenshot_path ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -119,9 +125,10 @@ function ObservationRow({
             No screenshot
           </div>
         )}
-      </div>
+      </div>}
 
       <div className="flex-1 min-w-0">
+        {error && <p role="alert" className="text-sm text-red-600 mb-2">{error}</p>}
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             {editing ? (
@@ -153,6 +160,7 @@ function ObservationRow({
             )}
             <button
               onClick={toggleApprove}
+              disabled={saving || editing}
               className={`text-xs border rounded px-2 py-1 transition-colors ${
                 observation.is_approved
                   ? 'text-neutral-500 border-neutral-200 hover:text-neutral-900'
@@ -209,7 +217,7 @@ function ObservationRow({
             </div>
           </div>
         ) : (
-          <p className="text-sm text-neutral-600 mt-2 whitespace-pre-wrap">{summary}</p>
+          <p className="text-sm text-neutral-600 mt-2 whitespace-pre-wrap">{observation.summary}</p>
         )}
 
         {expanded && (
@@ -231,6 +239,21 @@ export default function ObservationsClient({ observations }: { observations: Obs
   const [items, setItems] = useState(observations)
   const [seeding, setSeeding] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let running = false
+    async function refresh() {
+      if (running) return
+      running = true
+      try {
+        const res = await fetch('/api/observations', { cache: 'no-store' })
+        if (res.ok && !cancelled) setItems(await res.json())
+      } finally { running = false }
+    }
+    const timer = setInterval(() => { void refresh().catch(() => {}) }, 5000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [])
 
   const groups = groupByDay(items)
 
@@ -254,7 +277,7 @@ export default function ObservationsClient({ observations }: { observations: Obs
 
   function update(id: string, patch: Partial<Observation>) {
     setItems((prev) =>
-      prev.map((o) => (o.id === id ? { ...o, ...patch, edited_at: new Date().toISOString() } : o)),
+      prev.map((o) => (o.id === id ? { ...o, ...patch } : o)),
     )
   }
 

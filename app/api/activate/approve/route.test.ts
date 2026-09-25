@@ -31,7 +31,7 @@ function mockAuthUser(userId: string | null) {
     auth: {
       getUser: vi.fn().mockResolvedValue({ data: { user: userId ? { id: userId } : null } }),
     },
-  } as ReturnType<typeof getServerClient>)
+  } as unknown as Awaited<ReturnType<typeof getServerClient>>)
 }
 
 type ActivationRow = {
@@ -105,7 +105,7 @@ function buildAdminMock({
       }
       return {}
     }),
-  } as ReturnType<typeof getAdminClient>)
+  } as unknown as ReturnType<typeof getAdminClient>)
 
   return { updateSpy: _updateSpy, insertSpy: _insertSpy }
 }

@@ -1,142 +1,47 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-
 vi.mock('@/lib/supabase-server', () => ({ getServerClient: vi.fn() }))
 vi.mock('@/lib/supabase-admin', () => ({ getAdminClient: vi.fn() }))
-
 import { getServerClient } from '@/lib/supabase-server'
 import { getAdminClient } from '@/lib/supabase-admin'
 import { PATCH, DELETE } from './route'
-
-const USER = { id: 'usr-1', email: 'test@example.com' }
-
-function mockAuth(user: unknown) {
-  vi.mocked(getServerClient).mockResolvedValue({
-    auth: { getUser: vi.fn().mockResolvedValue({ data: { user } }) },
-    from: vi.fn(),
-  } as Awaited<ReturnType<typeof getServerClient>>)
-}
-
-function mockAdmin(options: {
-  existing?: { id: string; user_id: string } | null
-  lookupError?: unknown
-  updateError?: { message: string } | null
-  deleteError?: { message: string } | null
-  updated?: Record<string, unknown>
-} = {}) {
-  const { existing = null, lookupError = null, updateError = null, deleteError = null, updated = {} } = options
-
-  const mockEq2 = vi.fn().mockResolvedValue({ data: existing, error: lookupError })
-  const mockEq1 = vi.fn().mockReturnValue({ single: mockEq2 })
-
-  const updateSingle = vi.fn().mockResolvedValue({ data: updated, error: updateError })
-  const updateEq = vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ single: updateSingle }) })
-
-  const deleteEq = vi.fn().mockResolvedValue({ error: deleteError })
-
-  vi.mocked(getAdminClient).mockReturnValue({
-    from: vi.fn().mockImplementation(() => ({
-      select: vi.fn().mockReturnValue({ eq: mockEq1 }),
-      update: vi.fn().mockReturnValue({ eq: updateEq }),
-      delete: vi.fn().mockReturnValue({ eq: deleteEq }),
-    })),
-  } as unknown as ReturnType<typeof getAdminClient>)
-}
-
-function mockServerDelete(error: { message: string } | null = null) {
-  vi.mocked(getServerClient).mockResolvedValue({
-    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: USER } }) },
-    from: vi.fn().mockImplementation(() => ({
-      delete: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error }) }),
-    })),
-  } as unknown as Awaited<ReturnType<typeof getServerClient>>)
-}
-
-const PARAMS = { params: Promise.resolve({ id: 'obs-1' }) }
-
-describe('/api/observations/[id]', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
+const params = { params: Promise.resolve({ id: 'obs-1' }) }
+let user: { id: string } | null
+let existing: { id: string; user_id: string } | null
+let patch: Record<string, unknown>
+let failure: null | { message: string }
+beforeEach(() => {
+  user = { id: 'owner' }; existing = { id: 'obs-1', user_id: 'owner' }; patch = {}; failure = null
+  const query = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), is: vi.fn().mockReturnThis(), update: vi.fn((p) => { patch = p; return query }), single: vi.fn(async () => ({ data: Object.keys(patch).length ? { ...existing, ...patch } : existing, error: failure })), then: (resolve: (v: unknown) => unknown) => Promise.resolve({ error: failure }).then(resolve) }
+  vi.mocked(getAdminClient).mockReturnValue({ from: () => query } as unknown as ReturnType<typeof getAdminClient>)
+  vi.mocked(getServerClient).mockResolvedValue({ auth: { getUser: async () => ({ data: { user } }) }, from: () => query } as unknown as Awaited<ReturnType<typeof getServerClient>>)
+})
+const request = (body: unknown) => new Request('http://localhost/observation', { method: 'PATCH', body: JSON.stringify(body) })
+describe('observation review', () => {
+  it('requires sign-in for edits and deletions', async () => {
+    user = null
+    expect((await PATCH(request({ summary: 'x' }), params)).status).toBe(401)
+    expect((await DELETE(request({}), params)).status).toBe(401)
   })
-
-  describe('PATCH', () => {
-    it('returns 401 when unauthenticated', async () => {
-      mockAuth(null)
-      mockAdmin()
-      const res = await PATCH(
-        new Request('http://localhost/api/observations/obs-1', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ summary: 'x' }),
-        }),
-        PARAMS,
-      )
-      expect(res.status).toBe(401)
-    })
-
-    it('returns 404 when observation does not exist', async () => {
-      mockAuth(USER)
-      mockAdmin({ existing: null })
-      const res = await PATCH(
-        new Request('http://localhost/api/observations/obs-1', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ summary: 'x' }),
-        }),
-        PARAMS,
-      )
-      expect(res.status).toBe(404)
-    })
-
-    it('returns 403 when observation belongs to another user', async () => {
-      mockAuth(USER)
-      mockAdmin({ existing: { id: 'obs-1', user_id: 'usr-other' } })
-      const res = await PATCH(
-        new Request('http://localhost/api/observations/obs-1', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ summary: 'x' }),
-        }),
-        PARAMS,
-      )
-      expect(res.status).toBe(403)
-    })
-
-    it('edits summary and returns the observation', async () => {
-      mockAuth(USER)
-      const updated = { id: 'obs-1', summary: 'Edited text' }
-      mockAdmin({ existing: { id: 'obs-1', user_id: USER.id }, updated })
-
-      const res = await PATCH(
-        new Request('http://localhost/api/observations/obs-1', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: 'T', summary: 'Edited text' }),
-        }),
-        PARAMS,
-      )
-      expect(res.status).toBe(200)
-      const body = await res.json()
-      expect(body.observation.summary).toBe('Edited text')
-    })
+  it('rejects edits to another account', async () => {
+    existing!.user_id = 'someone-else'
+    expect((await PATCH(request({ summary: 'x' }), params)).status).toBe(403)
   })
-
-  describe('DELETE', () => {
-    it('returns 401 when unauthenticated', async () => {
-      mockAuth(null)
-      const res = await DELETE(new Request('http://localhost/x'), PARAMS)
-      expect(res.status).toBe(401)
-    })
-
-    it('returns 204 on success', async () => {
-      mockServerDelete(null)
-      const res = await DELETE(new Request('http://localhost/x'), PARAMS)
-      expect(res.status).toBe(204)
-    })
-
-    it('returns 500 when the delete fails', async () => {
-      mockServerDelete({ message: 'boom' })
-      const res = await DELETE(new Request('http://localhost/x'), PARAMS)
-      expect(res.status).toBe(500)
-    })
+  it('requires renewed approval when text changes', async () => {
+    const res = await PATCH(request({ summary: 'Corrected text' }), params)
+    expect(res.status).toBe(200)
+    expect(patch).toMatchObject({ summary: 'Corrected text', is_approved: false })
+    expect(patch.edited_at).toBeTruthy()
+  })
+  it('supports explicit approval and rejects malformed edits', async () => {
+    expect((await PATCH(request({ is_approved: true }), params)).status).toBe(200)
+    expect(patch).toEqual({ is_approved: true })
+    expect((await PATCH(request({ summary: '' }), params)).status).toBe(400)
+  })
+  it('writes a tombstone so offline retries cannot restore deleted text', async () => {
+    expect((await DELETE(request({}), params)).status).toBe(204)
+    expect(patch.deleted_at).toBeTruthy()
+    expect(patch.is_approved).toBe(false)
+    failure = { message: 'DB unavailable' }
+    expect((await DELETE(request({}), params)).status).toBe(500)
   })
 })
