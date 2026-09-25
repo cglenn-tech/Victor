@@ -36,7 +36,7 @@ Use a model that accepts multiple `image_url` JPEG data URLs through the OpenAI-
 
 ## Existing Supabase installation
 
-Apply `supabase/migrations/020_reliable_agent_flow.sql` after the existing migrations through 019, **before deploying this web and desktop update**. It adds missing device ownership, deletion tombstones, ingestion revisions, session state and transactional ingestion/merge functions. No existing work records are deleted.
+Apply `supabase/migrations/020_reliable_agent_flow.sql` to your existing Victor database **before deploying this web and desktop update**. It creates the observations table if migration 018 was skipped, fills in the structured fields from 019 and missing additive episode/device fields, then installs ownership checks, deletion tombstones, ingestion revisions, session state and transactional ingestion/merge functions. It can be rerun and does not delete existing work records. If an older copy failed with `relation "public.observations" does not exist`, replace the entire SQL query with this updated file and run it again.
 
 The early migrations contain historical schema resets. Do not rerun them on an existing database. There are also duplicate historical 018/019 version prefixes; apply the forward SQL through the Supabase SQL editor if the CLI's migration ledger does not match those filenames.
 

@@ -19,6 +19,7 @@ beforeAll(async () => {
   await db.exec(`
     CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
     CREATE SCHEMA auth;
+    CREATE TABLE auth.users (id UUID PRIMARY KEY);
     CREATE FUNCTION auth.uid() RETURNS UUID LANGUAGE sql AS $$ SELECT null::uuid $$;
     CREATE TABLE devices (id UUID PRIMARY KEY, user_id UUID, revoked_at TIMESTAMPTZ);
     CREATE TABLE episodes (id TEXT PRIMARY KEY, user_id UUID, device_id UUID REFERENCES devices(id), case_name TEXT, issue_worked_on TEXT, work_type TEXT,

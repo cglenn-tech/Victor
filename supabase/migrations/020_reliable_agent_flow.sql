@@ -1,5 +1,47 @@
--- Forward-only upgrade. Apply once after 019; do not rerun the early schema resets.
+-- Forward-only upgrade for an existing installation with episodes and devices.
+-- Repairs missing observation migrations 018/019 without resetting any tables.
+-- Safe to rerun: preserves existing work, edits, approvals and ownership.
 BEGIN;
+
+-- Some installations skipped 018/019 (their migration numbers were duplicated).
+-- Create the original table before adding its structured fields.
+CREATE TABLE IF NOT EXISTS public.observations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  observed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  screenshot_path TEXT,
+  summary TEXT NOT NULL DEFAULT ''
+);
+ALTER TABLE public.observations
+  ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS start_time TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS end_time TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS applications JSONB NOT NULL DEFAULT '[]',
+  ADD COLUMN IF NOT EXISTS entities JSONB NOT NULL DEFAULT '[]',
+  ADD COLUMN IF NOT EXISTS activity_type TEXT,
+  ADD COLUMN IF NOT EXISTS is_approved BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS episode_id TEXT REFERENCES public.episodes(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS observations_user_idx ON public.observations (user_id, observed_at DESC);
+CREATE INDEX IF NOT EXISTS observations_episode_idx ON public.observations (episode_id);
+CREATE INDEX IF NOT EXISTS observations_user_approved_idx ON public.observations (user_id, is_approved, observed_at DESC);
+ALTER TABLE public.observations ENABLE ROW LEVEL SECURITY;
+
+-- Also fill the additive fields used by the current capture and activation APIs.
+ALTER TABLE public.episodes
+  ADD COLUMN IF NOT EXISTS work_type TEXT NOT NULL DEFAULT 'project' CHECK (work_type IN ('project', 'administrative')),
+  ADD COLUMN IF NOT EXISTS issue_worked_on TEXT,
+  ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS active_seconds NUMERIC;
+ALTER TABLE public.devices
+  ADD COLUMN IF NOT EXISTS app_version TEXT,
+  ADD COLUMN IF NOT EXISTS installation_id UUID;
+ALTER TABLE IF EXISTS public.device_activations
+  ADD COLUMN IF NOT EXISTS installation_id UUID;
+CREATE UNIQUE INDEX IF NOT EXISTS devices_user_installation_unique
+  ON public.devices (user_id, installation_id) WHERE installation_id IS NOT NULL;
+
 ALTER TABLE public.observations
   ADD COLUMN IF NOT EXISTS device_id UUID REFERENCES public.devices(id),
   ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
@@ -12,10 +54,24 @@ ALTER TABLE public.devices
   ADD COLUMN IF NOT EXISTS browser_seen_at TIMESTAMPTZ;
 
 -- Tombstones keep retries from recreating records a lawyer removed.
-ALTER POLICY "users read own episodes" ON public.episodes
-  USING (auth.uid() = user_id AND deleted_at IS NULL);
-ALTER POLICY "users read own observations" ON public.observations
-  USING (auth.uid() = user_id AND deleted_at IS NULL);
+ALTER TABLE public.episodes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "users read own episodes" ON public.episodes;
+CREATE POLICY "users read own episodes" ON public.episodes
+  FOR SELECT USING (auth.uid() = user_id AND deleted_at IS NULL);
+DROP POLICY IF EXISTS "users read own observations" ON public.observations;
+CREATE POLICY "users read own observations" ON public.observations
+  FOR SELECT USING (auth.uid() = user_id AND deleted_at IS NULL);
+DROP POLICY IF EXISTS "users insert own observations" ON public.observations;
+CREATE POLICY "users insert own observations" ON public.observations
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "users update own observations" ON public.observations;
+CREATE POLICY "users update own observations" ON public.observations
+  FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "users delete own observations" ON public.observations;
+CREATE POLICY "users delete own observations" ON public.observations
+  FOR DELETE USING (auth.uid() = user_id);
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.observations TO authenticated;
+GRANT ALL ON public.observations TO service_role;
 
 -- Restrict both the caller and the device/owner pair inside the transaction.
 CREATE OR REPLACE FUNCTION public.sync_agent_episode(p_device_id UUID, p_user_id UUID, p_episode JSONB)

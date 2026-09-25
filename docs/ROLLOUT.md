@@ -4,7 +4,7 @@ The code and automated tests can be completed without production keys. This proc
 
 ## Deployment order
 
-1. Back up the existing Supabase database using your normal backup process. Apply `supabase/migrations/020_reliable_agent_flow.sql` once in the SQL editor. Check that all statements complete successfully.
+1. Back up the existing Supabase database using your normal backup process. Apply the current `supabase/migrations/020_reliable_agent_flow.sql` in the SQL editor. It creates missing observation tables/fields and can be rerun. If the earlier script failed because `public.observations` did not exist, replace the entire query with this corrected file. Check that all statements complete successfully.
 2. Configure the server variables listed in README. The existing Realtime token code uses the project's HS256 JWT secret; an asymmetric-only Supabase project needs a separate signing integration.
 3. Deploy the matching web commit. The build itself does not require secrets, but activation, login, sync and analysis do.
 4. Download the Mac workflow artifact from the pull request, or rebuild the desktop from this same commit using the macOS/Windows build workflows. The Mac workflow now starts the packaged executable and checks encrypted storage before publishing the artifact. The workflow defaults and minimum desktop version are now **1.1.0**; rebuild and reinstall that version (or newer). Do not assume the previously downloaded DMG contains these fixes.
@@ -34,3 +34,5 @@ The application sends screenshots transiently to Victor's backend and then the c
 `npm test` covers the web data contract, approval/report rules and actual SQL sync functions in an isolated Postgres-compatible database. `python -m unittest discover -s agent/tests -p test_connected_flow.py -v` covers 15 agent regressions, including offline startup recovery, atomic parent/observation saves, account isolation, pause accounting, batch recovery and graceful shutdown.
 
 The Mac pull-request workflow builds a DMG and runs `Victor --self-test` against the actual packaged executable. This imports the capture/consent/runtime dependencies and saves and reopens fictional observations in an encrypted temporary database with an ephemeral key. It does not test screen recording permission, real account activation, model quality or a production deployment.
+
+The migration regression tests also run against historical schemas with no observations table, the original 018 table, and the structured 019 table. Each scenario applies 020 twice, preserves existing matters and observations, exercises ingestion and merging, and checks access from a different account.
