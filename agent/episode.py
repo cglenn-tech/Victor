@@ -211,21 +211,22 @@ class Episode:
             self._pause_started_at = time.time() if at is None else at
             self._is_paused = True
 
-    def resume_timing(self) -> None:
+    def resume_timing(self, at: Optional[float] = None) -> None:
         """
         Accumulate the paused duration and mark as active.
         Called when new meaningful activity arrives after a pause.
         No-op if not currently paused.
         """
         if self._is_paused and self._pause_started_at is not None:
-            self._total_paused_seconds += time.time() - self._pause_started_at
+            resumed_at = time.time() if at is None else at
+            self._total_paused_seconds += max(0, resumed_at - self._pause_started_at)
             self._pause_started_at = None
             self._is_paused = False
 
     def add_structured_observation(self, so: StructuredObservation) -> None:
         """Attach a completed model observation to this episode."""
         self._structured_observations.append(so)
-        self.resume_timing()
+        self.resume_timing(calendar.timegm(time.strptime(so.start_time, "%Y-%m-%dT%H:%M:%SZ")))
         self.last_user_activity_at = calendar.timegm(time.strptime(so.end_time, "%Y-%m-%dT%H:%M:%SZ"))
         self.last_meaningful_evidence_at = time.time()
 
@@ -251,9 +252,9 @@ class Episode:
         self.add_raw_observation(obs)
 
     def close(self, at: Optional[str] = None) -> None:
-        if self._is_paused:
-            self.resume_timing()
         self.ended_at = at or _iso_now()
+        if self._is_paused:
+            self.resume_timing(calendar.timegm(time.strptime(self.ended_at, "%Y-%m-%dT%H:%M:%SZ")))
 
     def to_dict(self) -> dict:
         """

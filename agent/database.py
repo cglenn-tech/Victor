@@ -408,6 +408,7 @@ def save_episode(
     activity_classification: Optional[str] = None,
     classification_confidence: Optional[float] = None,
     has_inference_failure: bool = False,
+    *, commit: bool = True,
 ) -> None:
     d = episode.to_dict()
     conn.execute("""
@@ -438,11 +439,30 @@ def save_episode(
         activity_classification, classification_confidence,
         1 if has_inference_failure else 0, d.get("observation_count", 0),
     ))
-    conn.commit()
+    if commit:
+        conn.commit()
 
     # Update recent contexts for autocomplete
     if d.get("case_name"):
-        upsert_recent_context(conn, d["case_name"], d.get("issue_worked_on"), d.get("work_type", "project"))
+        upsert_recent_context(conn, d["case_name"], d.get("issue_worked_on"), d.get("work_type", "project"), commit=commit)
+
+
+def save_work_snapshot(conn, episode: Episode, **metadata) -> None:
+    """Commit the parent and its observations together, including after a retry.
+
+    SAVEPOINT works with sqlite3 and encrypted APSW connections. A failed child
+    insert cannot leave a durable parent claiming evidence that was never saved.
+    """
+    conn.execute("SAVEPOINT work_snapshot")
+    try:
+        save_episode(conn, episode, commit=False, **metadata)
+        for observation in episode._structured_observations:
+            save_observation(conn, observation.to_dict(episode_id=episode.id), commit=False)
+        conn.execute("RELEASE SAVEPOINT work_snapshot")
+    except BaseException:
+        conn.execute("ROLLBACK TO SAVEPOINT work_snapshot")
+        conn.execute("RELEASE SAVEPOINT work_snapshot")
+        raise
 
 
 def mark_synced(conn: sqlite3.Connection, episode_id: str, revision: int = 0) -> None:
@@ -525,6 +545,7 @@ def upsert_recent_context(
     case_name: str,
     issue: Optional[str],
     work_type: str,
+    *, commit: bool = True,
 ) -> None:
     """Insert or update a recent context record for autocomplete."""
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -537,7 +558,8 @@ def upsert_recent_context(
             last_used = excluded.last_used,
             use_count = use_count + 1
     """, (case_name, issue_key, work_type, now))
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 # ── Observation gaps ──────────────────────────────────────────────────────────
@@ -878,7 +900,7 @@ def _migrate_observations(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def save_observation(conn: sqlite3.Connection, obs: dict) -> None:
+def save_observation(conn: sqlite3.Connection, obs: dict, *, commit: bool = True) -> None:
     """Persist one structured observation (idempotent by id)."""
     conn.execute(
         """
@@ -902,7 +924,8 @@ def save_observation(conn: sqlite3.Connection, obs: dict) -> None:
             obs.get("created_at") or _now_iso(),
         ),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def mark_observation_synced(conn: sqlite3.Connection, obs_id: str) -> None:

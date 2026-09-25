@@ -31,8 +31,9 @@ class ModelNotConfiguredError(RuntimeError):
 _session = __import__('threading').local()
 
 
-def bind_session(owner: str, token: str) -> None:
+def bind_session(owner: str, token: str, stop_event=None) -> None:
     _session.owner, _session.token = owner, token
+    _session.stop_event = stop_event
 
 
 def is_configured() -> bool:
@@ -61,13 +62,18 @@ def chat_completion(
     url = config.BASE_URL.rstrip("/") + "/api/agent/analyze"
     payload = json.dumps({"messages": messages}).encode()
 
+    stop_event = getattr(_session, "stop_event", None)
     last_error = ""
     for attempt in range(config.MODEL_MAX_RETRIES + 1):
         if attempt > 0:
             backoff = min(2 ** attempt, 30) + (attempt * 0.5)
-            time.sleep(backoff)
+            if stop_event is not None:
+                if stop_event.wait(backoff):
+                    return None
+            else:
+                time.sleep(backoff)
 
-        if token != auth.read_credential() or owner != auth.read_user_id():
+        if (stop_event is not None and stop_event.is_set()) or token != auth.read_credential() or owner != auth.read_user_id():
             return None
         req = urllib.request.Request(
             url,

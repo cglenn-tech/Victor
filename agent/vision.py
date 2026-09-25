@@ -87,9 +87,13 @@ class ObservationBatcher:
         ))
         self._last_add = time.time()
 
+        # A recovered batch and the new frame must not produce two results
+        # through this single-result API. Leave the new batch for the next flush.
+        if completed is not None:
+            return completed
         if len(self._items) >= config.OBSERVATION_BATCH_SIZE:
             return self.flush(force=True)
-        return completed
+        return None
 
     def flush(self, force: bool = False) -> Optional[StructuredObservation]:
         """

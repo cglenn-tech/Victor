@@ -37,6 +37,7 @@ from browser_open import open_url
 class WindowsApp:
     def __init__(self):
         self._stop = threading.Event()
+        self._agent_thread = None
 
     def run(self):
         # Register Windows session event monitor (lock, logoff, disconnect, shutdown)
@@ -59,17 +60,21 @@ class WindowsApp:
                 return
             auth.store_credential(token)
 
-        threading.Thread(
+        self._agent_thread = threading.Thread(
             target=main.main,
             kwargs={"stop_event": self._stop},
-            daemon=True,
-        ).start()
+            daemon=False,
+        )
+        self._agent_thread.start()
 
         try:
-            while not self._stop.is_set():
-                time.sleep(1)
+            while self._agent_thread.is_alive() and not self._stop.wait(1):
+                pass
         except KeyboardInterrupt:
             self._stop.set()
+        finally:
+            self._stop.set()
+            self._agent_thread.join()  # wait for the final SQLite transaction
 
     def _emergency_stop(self):
         """Called immediately on lock/logout/sleep. Stops recording."""

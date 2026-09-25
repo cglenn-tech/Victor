@@ -40,6 +40,7 @@ Degraded mode (model endpoint unreachable or unconfigured):
 import threading
 import time
 import traceback
+import urllib.error
 from typing import Callable, Optional
 
 from dotenv import load_dotenv
@@ -59,142 +60,120 @@ from episode_engine import EpisodeEngine
 from observer import _CONSENT_BLOCKED
 
 
+def _establish_session(owner, token, stop_event, state_callback=None) -> bool:
+    """Recover from a transient startup failure without ever starting capture."""
+    while not stop_event.is_set():
+        if (auth.read_user_id(), auth.read_credential()) != (owner, token):
+            return False
+        try:
+            result = auth._api_bearer('/api/device/heartbeat', token, method='POST')
+            if result.get('ok') is True:
+                return True
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403):
+                if auth.read_credential() == token:
+                    auth.delete_credential()
+                if state_callback:
+                    state_callback('reconnect_required')
+                return False
+        except Exception:
+            pass
+        if state_callback:
+            state_callback('connecting')
+        stop_event.wait(5)
+    return False
+
+
 def main(
     state_callback: Optional[Callable[[str], None]] = None,
     stop_event: Optional[threading.Event] = None,
 ) -> None:
-    print("[agent] Victor starting")
-    print(f"[agent] db {config.DB_PATH}")
-
-    # Phase 2: purge stale temp frames on startup (crash safety net)
+    stop_event = stop_event or threading.Event()
+    owner, token = auth.read_user_id(), auth.read_credential()
+    if not owner or not token:
+        return
+    realtime_client.force_stop()
+    realtime_client.set_status('connecting')
+    realtime_client.start()
+    if not _establish_session(owner, token, stop_event, state_callback):
+        return
+    model_client.bind_session(owner, token, stop_event)
     try:
         database.purge_stale_temp_frames()
     except Exception:
         pass
-
-    owner, token = auth.read_user_id(), auth.read_credential()
-    if not owner or not token:
-        return
-    try:
-        auth._api_bearer('/api/device/heartbeat', token, method='POST')
-    except Exception:
-        return  # cannot establish a fresh paused session
-    model_client.bind_session(owner, token)
-    realtime_client.start()
-
     conn = database.connect(owner)
-
-    # Crash safety: check for dirty shutdown BEFORE marking current startup dirty.
-    # Order matters: read the previous value first, then overwrite with dirty.
-    _prev_crashed = database.check_dirty_shutdown(conn)
-    database.mark_dirty_shutdown(conn)
-
-    # Mark known garbage and propagate to server
-    invalid_ids = database.mark_invalid_episodes(conn)
-    if invalid_ids:
-        sync.enqueue_cleanup(invalid_ids)
-
-    # Phase 1: initialize ConsentManager (noop when ENABLE_CAPTURE_LEASES=false)
-    consent_manager = None
-    crashed = _prev_crashed
-    if config.ENABLE_CAPTURE_LEASES:
-        from consent_manager import ConsentManager
-        consent_manager = ConsentManager(conn)
-        print(f"[agent] capture leases enabled — session epoch {consent_manager.session_epoch}")
-
-        # If previous session crashed, invalidate all leases so users are re-prompted
-        if crashed:
-            consent_manager.invalidate_all("app_crashed")
-
-        # Show batch re-consent for any leases invalidated before this startup
-        invalidated = consent_manager.get_invalidated_leases()
-        if invalidated:
-            consent_manager.begin_batch_reconsent(invalidated)
-
-    observer.reset()
     engine = EpisodeEngine()
     batcher = vision.ObservationBatcher()
-    sync.start()
-
-    # Crash recovery: requeue anything persisted locally but never synced.
-    # Server upserts are idempotent by id, so re-sends are safe.
-    for ep in database.get_unsynced_episodes(conn):
-        sync.enqueue_episode(ep)
-    for ob in database.get_unsynced_observations(conn):
-        sync.enqueue_observation(ob)
-    if not model_client.is_configured():
-        print("[agent] WARNING: desktop is not linked — "
-              "sign in and connect this device")
-
-    _ws_state = 'idle'                  # tracks last state broadcast to realtime_client
-    _open_gap_id: Optional[str] = None  # current open ObservationGap (if any)
-
-    while True:
-        if auth.read_user_id() != owner or auth.read_credential() != token:
-            # In-flight results belong to the original account; never flush them
-            # using a replacement token. Persist already-analyzed work locally.
-            batcher.discard()
-            closed = engine.force_close_active()
-            if closed:
-                _close_and_save(conn, closed)
-            break
-        if stop_event is not None and stop_event.is_set():
-            print("[agent] stop_event set — shutting down")
-            _flush_batcher(conn, engine, batcher)
-            if engine.active:
-                _close_and_save(conn, engine.force_close_active())
-            if _open_gap_id:
-                database.close_gap(conn, _open_gap_id)
-            database.mark_clean_shutdown(conn)
-            break
-        try:
-            if realtime_client.is_recording_active():
-                if _ws_state != 'recording':
-                    realtime_client.set_status('recording')
-                    _ws_state = 'recording'
-                try:
-                    _open_gap_id = _cycle(conn, engine, batcher, consent_manager, _open_gap_id)
-                except Exception:
-                    traceback.print_exc()
-                    try:
+    open_gap_id = None
+    consent_manager = None
+    state = 'idle'
+    try:
+        crashed = database.check_dirty_shutdown(conn)
+        database.mark_dirty_shutdown(conn)
+        database.mark_invalid_episodes(conn)
+        if config.ENABLE_CAPTURE_LEASES:
+            from consent_manager import ConsentManager
+            consent_manager = ConsentManager(conn)
+            if crashed:
+                consent_manager.invalidate_all('app_crashed')
+            invalidated = consent_manager.get_invalidated_leases()
+            if invalidated:
+                consent_manager.begin_batch_reconsent(invalidated)
+        observer.reset()
+        sync.start()  # persisted unsynced rows are the recovery queue
+        realtime_client.set_status('idle')
+        while not stop_event.is_set():
+            if (auth.read_user_id(), auth.read_credential()) != (owner, token):
+                break
+            try:
+                if realtime_client.is_recording_active():
+                    if state != 'recording':
+                        realtime_client.set_status('recording')
+                        state = 'recording'
+                    open_gap_id = _cycle(conn, engine, batcher, consent_manager, open_gap_id)
+                    if state_callback:
+                        state_callback('recording')
+                    stop_event.wait(config.CAPTURE_INTERVAL_SECONDS)
+                else:
+                    if state == 'recording' or len(batcher):
+                        realtime_client.set_status('finalizing')
+                        _flush_batcher(conn, engine, batcher)
+                        if engine.active:
+                            _close_and_save(conn, engine.force_close_active())
+                            realtime_client.broadcast_daily_review()
+                        if open_gap_id:
+                            database.close_gap(conn, open_gap_id)
+                            open_gap_id = None
                         observer.reset()
-                    except Exception:
-                        pass
+                    state = 'idle'
+                    realtime_client.set_status('error' if batcher.last_error else 'idle')
+                    if state_callback:
+                        state_callback('error' if batcher.last_error else 'idle')
+                    stop_event.wait(1)
+            except Exception:
+                traceback.print_exc()
+                realtime_client.set_status('error')
                 if state_callback:
-                    state_callback('recording' if engine.active else 'waiting')
-                time.sleep(config.CAPTURE_INTERVAL_SECONDS)
-            else:
-                # No active work session — flush any pending batch, finalize and idle
-                _flush_batcher(conn, engine, batcher)
-                if engine.active:
-                    _close_and_save(conn, engine.force_close_active())
-                    realtime_client.broadcast_daily_review()   # notify web to show review modal
-                if _open_gap_id:
-                    database.close_gap(conn, _open_gap_id)
-                    _open_gap_id = None
-                if _ws_state != 'idle':
-                    observer.reset()
-                    realtime_client.set_status('idle')
-                    _ws_state = 'idle'
-                if state_callback:
-                    state_callback('idle')
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("\n[agent] shutting down")
-            _flush_batcher(conn, engine, batcher)
+                    state_callback('error')
+                observer.reset()
+                stop_event.wait(config.CAPTURE_INTERVAL_SECONDS)
+    except KeyboardInterrupt:
+        stop_event.set()
+    finally:
+        # Shutdown never starts new model requests. Completed observations still
+        # commit locally, even when the token was revoked while analysis ran.
+        try:
             if engine.active:
                 _close_and_save(conn, engine.force_close_active())
-            if _open_gap_id:
-                database.close_gap(conn, _open_gap_id)
+            if open_gap_id:
+                database.close_gap(conn, open_gap_id)
             database.mark_clean_shutdown(conn)
-            break
-        except Exception:
-            traceback.print_exc()
-            time.sleep(config.CAPTURE_INTERVAL_SECONDS)
-
-    batcher.discard()
-    observer.reset()
-    conn.close()
+        finally:
+            batcher.discard()
+            observer.reset()
+            realtime_client.force_stop()
+            conn.close()
 
 
 def _cycle(
@@ -279,8 +258,6 @@ def _handle_observation(conn, engine: EpisodeEngine, so) -> None:
         return
     # Persist a current parent snapshot before its child. Both survive crashes.
     _close_and_save(conn, engine.active)
-    database.save_observation(conn, so.to_dict(episode_id=engine.active.id))
-    sync.enqueue_observation({})
 
 
 def _flush_batcher(conn, engine: EpisodeEngine, batcher) -> None:
@@ -294,7 +271,7 @@ def _flush_batcher(conn, engine: EpisodeEngine, batcher) -> None:
 
 
 def _close_and_save(conn, episode: Episode) -> None:
-    """Finalize a closed episode, discard if too short, otherwise persist and sync."""
+    """Persist one coherent snapshot, including its original observations."""
     if episode is None:
         return
     finalizer.finalize(episode)
@@ -305,7 +282,7 @@ def _close_and_save(conn, episode: Episode) -> None:
     class_confidence = getattr(episode, "_classification_confidence", None)
     inference_failed = getattr(episode, "_has_inference_failure", False)
 
-    database.save_episode(
+    database.save_work_snapshot(
         conn, episode,
         activity_classification=activity_class,
         classification_confidence=class_confidence,
@@ -313,7 +290,7 @@ def _close_and_save(conn, episode: Episode) -> None:
     )
     sync.enqueue_episode(episode.to_dict())
     print(
-        f"[agent] saved '{episode.case_name}' "
+        f"[agent] saved episode {episode.id[:8]} "
         f"({episode.duration_minutes:.1f}min, {len(episode.key_observations)} observations)"
     )
 

@@ -10,8 +10,15 @@
 
 set -euo pipefail
 
-VERSION="${BUILD_VERSION:-1.0.0}"
+VERSION="${BUILD_VERSION:-1.1.0}"
 IDENTITY="${APPLE_IDENTITY:-}"
+
+export BUILD_VERSION="$VERSION"
+python - <<'VERSION_PY'
+import os
+from pathlib import Path
+Path('_version.py').write_text('__version__ = ' + repr(os.environ['BUILD_VERSION']) + '\n')
+VERSION_PY
 
 echo "==> Building with PyInstaller (version ${VERSION})"
 ICON_ARG=""
@@ -28,6 +35,8 @@ pyinstaller --clean --name Victor --windowed \
 # Registers victor:// (plus legacy buildharvey://) so the website can deep-link into the running app.
 echo "==> Applying Victor bundle metadata and URL schemes"
 INFOPLIST="dist/Victor.app/Contents/Info.plist"
+plutil -replace CFBundleShortVersionString -string "$VERSION" "$INFOPLIST"
+plutil -replace CFBundleVersion -string "$VERSION" "$INFOPLIST"
 plutil -remove CFBundleURLTypes "$INFOPLIST" 2>/dev/null || true
 plutil -insert CFBundleURLTypes \
   -json '[{"CFBundleURLName":"Victor Protocol","CFBundleURLSchemes":["victor","buildharvey"]}]' \

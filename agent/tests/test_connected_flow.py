@@ -22,7 +22,7 @@ for k, v in dict(PRIVATE_MODE=False, MAX_EPISODE_SECONDS=28800, INACTIVITY_PAUSE
                 OBSERVATION_FLUSH_IDLE_SECONDS=600, MIN_OBSERVATION_BATCH=2,
                 VISION_ANALYSIS_SIZE=(1440,900), VISION_JPEG_QUALITY=85,
                 VISION_MAX_ENCODED_BYTES=3*1024*1024, MODEL_MAX_RETRIES=0,
-                ENABLE_CAPTURE_LEASES=False).items():
+                ENABLE_CAPTURE_LEASES=False, CAPTURE_INTERVAL_SECONDS=.01).items():
     setattr(config, k, v)
 sys.modules['config'] = config
 credentials = {'owner': 'owner-a', 'token': 'token-a'}
@@ -31,11 +31,13 @@ auth.read_user_id = lambda: credentials['owner']
 auth.read_credential = lambda: credentials['token']
 auth.store_device_id = Mock()
 auth._api_bearer = Mock()
+auth.delete_credential = Mock(side_effect=lambda: credentials.update(token=None))
 sys.modules['auth'] = auth
 observer = types.ModuleType('observer')
 observer.Observation = object
 observer._CONSENT_BLOCKED = object()
 observer.observe = Mock(return_value=None)
+observer.reset = Mock()
 observer.is_user_work = lambda _: True
 sys.modules['observer'] = observer
 logging = types.ModuleType('bh_logging')
@@ -72,6 +74,7 @@ class ConnectedFlow(unittest.TestCase):
         config.DB_PATH = Path(self.temp.name) / 'legacy.db'
         config.SCREENSHOTS_DIR = Path(self.temp.name)
         credentials.update(owner='owner-a', token='token-a')
+        model_client.bind_session('owner-a', 'token-a')
         self.conn = database.connect('owner-a')
         self.now = int(time.time())
         self.engine = EpisodeEngine()
@@ -180,6 +183,111 @@ class ConnectedFlow(unittest.TestCase):
         with patch('urllib.request.urlopen') as network:
             self.assertIsNone(model_client.chat_completion([{'role':'user','content':'old data'}]))
             network.assert_not_called()
+
+    def test_work_snapshot_rolls_back_parent_when_child_save_fails(self):
+        so = observation('Alpha', self.now-60, self.now-30)
+        self.engine.ingest_observation(so)
+        with patch.object(database, 'save_observation', side_effect=OSError('disk full')):
+            with self.assertRaises(OSError):
+                main._close_and_save(self.conn, self.engine.active)
+        self.assertEqual(database.get_unsynced_episodes(self.conn), [])
+        self.assertEqual(database.get_unsynced_observations(self.conn), [])
+        main._close_and_save(self.conn, self.engine.active)
+        parents = database.get_unsynced_episodes(self.conn)
+        children = database.get_unsynced_observations(self.conn)
+        self.assertEqual(len(parents), 1)
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0]['episode_id'], parents[0]['id'])
+
+    def test_startup_recovers_from_network_failure_and_revocation_needs_reconnect(self):
+        from urllib.error import HTTPError
+        stop = Mock()
+        stop.is_set.return_value = False
+        callback = Mock()
+        with patch.object(auth, '_api_bearer', side_effect=[OSError('offline'), {'ok': True}]) as api:
+            self.assertTrue(main._establish_session('owner-a', 'token-a', stop, callback))
+            self.assertEqual(api.call_count, 2)
+            stop.wait.assert_called_once_with(5)
+        callback.assert_called_with('connecting')
+        with patch.object(auth, '_api_bearer', side_effect=HTTPError('https://victor.invalid',401,'revoked',{},None)):
+            self.assertFalse(main._establish_session('owner-a', 'token-a', stop, callback))
+        self.assertIsNone(credentials['token'])
+        callback.assert_called_with('reconnect_required')
+        stopped = threading.Event()
+        stopped.set()
+        with patch.object(auth, '_api_bearer') as api:
+            self.assertFalse(main._establish_session('owner-a', 'token-a', stopped))
+            api.assert_not_called()
+
+    def test_worker_shutdown_persists_completed_work_without_new_analysis(self):
+        stop = threading.Event()
+        so = observation('Alpha', self.now-60, self.now-30)
+        def cycle(conn, engine, batcher, consent, gap):
+            engine.ingest_observation(so)
+            stop.set()
+        with patch.object(main, '_establish_session', return_value=True), \
+             patch.object(main, '_cycle', side_effect=cycle), \
+             patch.object(rc, 'start'), patch.object(sync, 'start'), \
+             patch.object(rc, 'is_recording_active', return_value=True), \
+             patch.object(model_client, 'chat_completion') as analyze:
+            main.main(stop_event=stop)
+            analyze.assert_not_called()
+        parents = database.get_unsynced_episodes(self.conn)
+        children = database.get_unsynced_observations(self.conn)
+        self.assertEqual(len(parents), 1)
+        self.assertEqual([c['id'] for c in children], [so.id])
+        self.assertFalse(database.check_dirty_shutdown(self.conn))
+
+    def test_cancelled_model_request_never_sends_screenshot(self):
+        stop = threading.Event()
+        model_client.bind_session('owner-a', 'token-a', stop)
+        stop.set()
+        with patch('urllib.request.urlopen') as network:
+            self.assertIsNone(model_client.chat_completion([{'role': 'user', 'content': 'fictional screenshot'}]))
+            network.assert_not_called()
+
+    def test_recovered_single_image_batch_does_not_lose_previous_result(self):
+        batcher = vision.ObservationBatcher()
+        frames = []
+        for number in range(2):
+            path = Path(self.temp.name) / f'frame{number}.jpg'
+            path.touch()
+            frames.append(types.SimpleNamespace(screenshot_path=str(path), timestamp=iso(self.now),
+                app='Word', window_title='Alpha', browser_url='', file_path='', entities=['Alpha']))
+        first = observation('Alpha', self.now-60, self.now-30)
+        second = observation('Alpha', self.now-30, self.now)
+        with patch.object(config, 'OBSERVATION_BATCH_SIZE', 1), \
+             patch.object(vision, '_analyze_batch', side_effect=[None, first, second]):
+            self.assertIsNone(batcher.add(frames[0]))
+            self.assertIs(batcher.add(frames[1]), first)
+            self.assertEqual(len(batcher), 1)
+            self.assertIs(batcher.flush(force=True), second)
+        self.assertTrue(all(not Path(f.screenshot_path).exists() for f in frames))
+
+    def test_pause_ends_at_evidence_time_instead_of_delayed_model_response(self):
+        ep = Episode('e', 'Alpha', iso(self.now-1200), None)
+        ep.pause_timing(at=self.now-900)
+        ep.close(at=iso(self.now-600))
+        self.assertEqual(ep.active_seconds, 300)
+        ep = Episode('e', 'Alpha', iso(self.now-1200), None)
+        ep.pause_timing(at=self.now-900)
+        ep.add_structured_observation(observation('Alpha', self.now-600, self.now-300))
+        ep.close(at=iso(self.now-300))
+        self.assertEqual(ep.active_seconds, 600)
+
+    def test_windows_exit_waits_for_worker_to_finish_saving(self):
+        import app_windows
+        app = app_windows.WindowsApp()
+        saved = threading.Event()
+        def worker(stop_event):
+            stop_event.set()
+            time.sleep(.02)
+            saved.set()
+        with patch.dict(sys.modules, {'session_monitor_windows': types.SimpleNamespace(start=Mock())}), \
+             patch.object(app_windows, 'open_url'), patch.object(main, 'main', side_effect=worker):
+            app.run()
+        self.assertTrue(saved.is_set())
+        self.assertFalse(app._agent_thread.is_alive())
 
 
 if __name__ == '__main__':
