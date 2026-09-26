@@ -11,6 +11,7 @@ mss
 Pillow
 numpy
 python-dotenv
+certifi>=2026.7.22
 websockets
 realtime==2.31.0
 

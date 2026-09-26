@@ -5,15 +5,66 @@ screen, reads saved credentials, opens the user's database, or calls a server.
 """
 from pathlib import Path
 import secrets
+import ssl
 import sqlite3
+import sys
 import tempfile
 import traceback
+
+
+def check_certificate_store() -> str:
+    import certifi
+    from tls_config import configure_tls
+
+    path = Path(configure_tls()).resolve()
+    bundled_path = Path(certifi.where()).resolve()
+    if getattr(sys, 'frozen', False):
+        bundle_root = Path(sys._MEIPASS).resolve()
+        # PyInstaller's Mac bundle links data from Frameworks into Resources.
+        if bundle_root.name == 'Frameworks' and bundle_root.parent.name == 'Contents':
+            bundle_root = bundle_root.parent
+        assert bundled_path.is_relative_to(bundle_root), 'CA store is outside the app'
+    context = ssl.create_default_context()
+    assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
+    assert context.cert_store_stats()['x509_ca'] > 0, 'No trusted certificates loaded'
+    assert path.is_file(), 'Configured CA store is missing'
+    return 'Verified TLS certificate store: PASS'
+
+
+def run_connection_check() -> int:
+    """Public HTTPS check only: no device credentials, capture, or account writes."""
+    import urllib.error
+    import urllib.request
+    import config
+
+    lines = [f'Victor {config.APP_VERSION} connection check']
+    result = 0
+    try:
+        lines.append(check_certificate_store())
+        # The authenticated route must reject this credential-free request.
+        # Reaching its HTTP response proves TLS completed successfully.
+        try:
+            with urllib.request.urlopen(config.BASE_URL + '/api/device/heartbeat', timeout=20) as response:
+                raise RuntimeError(f'Heartbeat unexpectedly returned HTTP {response.status}')
+        except urllib.error.HTTPError as exc:
+            if exc.code != 401:
+                raise RuntimeError(f'Website returned HTTP {exc.code}') from None
+        lines.append('Website HTTPS connection (no credentials): PASS')
+    except Exception as exc:
+        lines.append(f'Connection check: FAIL ({type(exc).__name__})')
+        result = 1
+    text = '\n'.join(lines) + '\n'
+    (Path(tempfile.gettempdir()) / 'victor-connection-check.log').write_text(text)
+    if sys.stdout is not None:
+        print(text, end='')
+    return result
 
 
 def run_self_test() -> int:
     lines = []
     result = 0
     try:
+        lines.append(check_certificate_store())
         # Explicit imports let PyInstaller discover the same dependencies that
         # are loaded lazily when the capture worker starts.
         import main  # noqa: F401

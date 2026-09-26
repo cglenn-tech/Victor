@@ -27,6 +27,9 @@ import objc
 import auth
 import permissions
 import realtime_client
+from bh_logging import get_logger
+
+log = get_logger('app')
 
 # Apple Event constants for URL scheme handling
 _kInternetEventClass = 0x4755524C  # 'GURL'
@@ -215,6 +218,9 @@ class AppDelegate(AppKit.NSObject):
         try:
             if not self._terminating and not self._suspended:
                 self._activate_and_start()
+        except Exception as exc:
+            log.error('startup.failed', error=type(exc).__name__)
+            self._on_agent_state('error')
         finally:
             self._startup_lock.release()
 
@@ -240,6 +246,7 @@ class AppDelegate(AppKit.NSObject):
         # start the agent so the website can detect presence and leave the
         # download loop. Capture stays blocked until permission is granted.
         status = permissions.check()
+        log.info('startup.permissions', screen_recording=status, version=config.APP_VERSION)
         if status != 'GRANTED':
             AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(
                 self._prompt_permissions
@@ -316,10 +323,11 @@ class AppDelegate(AppKit.NSObject):
             self._agent_thread.start()
 
     def _run_agent(self, stop_event):
-        import main as agent_main
         try:
+            import main as agent_main
             agent_main.main(state_callback=self._on_agent_state, stop_event=stop_event)
-        except Exception:
+        except Exception as exc:
+            log.error('worker.failed', error=type(exc).__name__)
             import traceback
             traceback.print_exc()
             self._on_agent_state('error')
@@ -371,4 +379,7 @@ if __name__ == '__main__':
     if '--self-test' in sys.argv:
         from self_test import run_self_test
         sys.exit(run_self_test())
+    if '--check-connection' in sys.argv:
+        from self_test import run_connection_check
+        sys.exit(run_connection_check())
     main()

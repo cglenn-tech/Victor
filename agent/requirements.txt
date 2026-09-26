@@ -6,6 +6,7 @@ pyobjc-framework-Security>=10.0
 pyobjc-framework-Vision
 pyobjc-framework-Quartz>=10.0
 python-dotenv
+certifi>=2026.7.22
 websockets
 realtime==2.31.0
 apsw-sqlite3mc>=3.43.0.0

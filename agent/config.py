@@ -1,5 +1,8 @@
 import os
 from pathlib import Path
+from tls_config import configure_tls
+
+configure_tls()
 
 # ── Build-time production lock ────────────────────────────────────────────────
 # When PRODUCTION_BUILD=True (set by build pipeline), privacy flags are forced
@@ -83,7 +86,7 @@ BASE_URL = os.environ.get("BUILDHARVEY_BASE_URL", "https://buildharvey.com")
 try:
     from _version import __version__ as APP_VERSION
 except ImportError:
-    APP_VERSION = '1.1.1'
+    APP_VERSION = '1.1.2'
 
 # ── Privacy mode (master switch) ─────────────────────────────────────────────
 # PRIVATE_MODE=true is the production default. CI and development set it to

@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-VERSION="${BUILD_VERSION:-1.1.1}"
+VERSION="${BUILD_VERSION:-1.1.2}"
 IDENTITY="${APPLE_IDENTITY:-}"
 
 export BUILD_VERSION="$VERSION"
@@ -28,6 +28,7 @@ fi
 # shellcheck disable=SC2086
 pyinstaller --clean --name Victor --windowed \
   $ICON_ARG \
+  --collect-data certifi \
   --osx-bundle-identifier com.victor.agent \
   app.py
 
