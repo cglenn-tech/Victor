@@ -79,7 +79,7 @@ export default function ReportGenerator() {
   }
 
   function setLastWeek() {
-    const lastMon = new Date(isoMonday(new Date()) + "T00:00:00Z");
+    const lastMon = new Date(isoMonday(new Date()) + "T12:00:00");
     lastMon.setDate(lastMon.getDate() - 7);
     const mon = localDate(lastMon);
     setFrom(mon);

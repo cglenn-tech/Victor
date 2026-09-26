@@ -25,7 +25,7 @@ export function hasRecentHeartbeat(device: DeviceStatus, now = Date.now()): bool
   return Number.isFinite(age) && age >= 0 && age < 90_000
 }
 
-export const AGENT_STATES = ['connecting', 'idle', 'recording', 'stopping', 'finalizing', 'sync_pending', 'error'] as const
+export const AGENT_STATES = ['connecting', 'idle', 'recording', 'stopping', 'finalizing', 'sync_pending', 'analysis_pending', 'capture_blocked', 'error'] as const
 export type AgentState = typeof AGENT_STATES[number]
 export function isAgentState(value: unknown): value is AgentState {
   return typeof value === 'string' && (AGENT_STATES as readonly string[]).includes(value)

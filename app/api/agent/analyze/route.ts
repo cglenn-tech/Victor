@@ -1,6 +1,7 @@
 import { getDeviceFromToken } from '@/lib/device-auth'
 import { chatCompletion, isModelConfigured, type ModelMessage } from '@/lib/model-client'
 import { rateLimit } from '@/lib/rate-limit'
+import { pollAnalysis, runpodEndpoint, submitAnalysis, verifyJob } from '@/lib/analysis-jobs'
 
 export const maxDuration = 60
 
@@ -8,7 +9,6 @@ export async function POST(request: Request) {
   const device = await getDeviceFromToken(request.headers.get('authorization'))
   if (!device) return Response.json({ error: 'Unauthorized' }, { status: 401 })
   if (!isModelConfigured()) return Response.json({ error: 'Vision service is not configured' }, { status: 503 })
-  if (await rateLimit(`vision:${device.user_id}`, 20, 60)) return Response.json({ error: 'Try again shortly' }, { status: 429 })
   // Stay below typical serverless request limits. Never log or persist image bodies.
   const reader = request.body?.getReader()
   if (!reader) return Response.json({ error: 'Missing body' }, { status: 400 })
@@ -26,6 +26,15 @@ export async function POST(request: Request) {
       chunks.push(value)
     }
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    if (typeof body.job === 'string') {
+      try { verifyJob(body.job, device) } catch { return Response.json({ error: 'Invalid or expired analysis job' }, { status: 403 }) }
+      if (await rateLimit(`vision-poll:${device.id}`, 60, 60)) return Response.json({ error: 'Try again shortly' }, { status: 429 })
+      try {
+        const result = await pollAnalysis(body.job, device)
+        return Response.json(result, { status: 'pending' in result ? 202 : 200, headers: { 'Cache-Control': 'no-store' } })
+      } catch { return Response.json({ error: 'Analysis job could not be retrieved' }, { status: 502 }) }
+    }
+    if (await rateLimit(`vision:${device.user_id}`, 20, 60)) return Response.json({ error: 'Try again shortly' }, { status: 429 })
     const messages = body.messages as ModelMessage[]
     if (!Array.isArray(messages) || messages.length !== 1 || messages[0].role !== 'user') throw new Error()
     const content = messages[0].content
@@ -41,6 +50,10 @@ export async function POST(request: Request) {
     }
     if (!images || images > 5) throw new Error()
     try {
+      if (body.async === true && runpodEndpoint()) {
+        const result = await submitAnalysis(messages, device)
+        return Response.json(result, { status: 'pending' in result ? 202 : 200, headers: { 'Cache-Control': 'no-store' } })
+      }
       const content = await chatCompletion(messages, { maxTokens: 1024, timeoutMs: 45_000, retries: 0 })
       return Response.json({ choices: [{ message: { content } }] }, { headers: { 'Cache-Control': 'no-store' } })
     } catch {

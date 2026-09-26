@@ -4,6 +4,8 @@ import { getServerClient } from "@/lib/supabase-server";
 import { fmt12Date } from "@/lib/fmt";
 import type { Episode } from "@/lib/types";
 import AppNav from "@/components/AppNav";
+import { reportIsCurrent } from '@/lib/report-validity'
+import LocalWorkTime from '@/components/LocalWorkTime'
 
 export const dynamic = "force-dynamic";
 
@@ -16,19 +18,10 @@ type WeeklyReport = {
   created_at: string;
   updated_at: string;
   content: string;
+  source_episode_ids: string[] | null;
 };
 
 function EpisodeFilesRow({ episode }: { episode: Episode }) {
-  const start = new Date(episode.started_at).toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-  const end = new Date(episode.ended_at).toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
   const duration = (() => {
     const m = activeMinutes(episode);
     if (!m || m < 1) return "< 1m";
@@ -44,7 +37,7 @@ function EpisodeFilesRow({ episode }: { episode: Episode }) {
           {episode.case_name}
         </p>
         <p className="text-xs text-neutral-400 mt-0.5">
-          {fmt12Date(episode.started_at)} · {start} – {end} · {duration}
+          <LocalWorkTime start={episode.started_at} end={episode.ended_at} /> · {duration}
         </p>
         {episode.key_observations.length > 0 && (
           <p className="text-xs text-neutral-500 mt-1 line-clamp-2">
@@ -66,7 +59,7 @@ export default async function FilesPage() {
   const [reportsResult, episodesResult] = await Promise.all([
     supabase
       .from("weekly_reports")
-      .select("id, week_start, week_end, period_label, version, created_at, updated_at, content")
+      .select("id, week_start, week_end, period_label, version, created_at, updated_at, content, source_episode_ids")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false }),
     supabase
@@ -81,7 +74,9 @@ export default async function FilesPage() {
   ]);
 
   // All reports, already sorted by created_at DESC from the query
-  const reports: WeeklyReport[] = reportsResult.data ?? [];
+  const candidates: WeeklyReport[] = reportsResult.data ?? [];
+  const validity = await Promise.all(candidates.map(r => reportIsCurrent(user.id, r)));
+  const reports = candidates.filter((_, i) => validity[i]);
   const episodes: Episode[] = episodesResult.data ?? [];
 
   return (

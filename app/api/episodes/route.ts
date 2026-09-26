@@ -12,6 +12,8 @@ export async function GET() {
   const { data, error } = await supabase
     .from('episodes')
     .select('*')
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
     .order('started_at', { ascending: false })
 
   if (error) {

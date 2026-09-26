@@ -134,6 +134,10 @@ def is_recording_active() -> bool:
     return _server_allowed and _recording_event.is_set()
 
 
+def current_status() -> str:
+    return _current_state
+
+
 def set_status(state: str) -> None:
     """
     Broadcast the current agent state to all connected browser tabs.

@@ -72,6 +72,12 @@ def run_self_test() -> int:
         import capture  # noqa: F401
         import realtime_client  # noqa: F401
         import Security  # noqa: F401
+        import ScreenCaptureKit as SC
+        import analysis_queue  # noqa: F401
+        import session_consent  # noqa: F401
+        assert hasattr(SC.SCScreenshotManager, 'captureImageWithFilter_configuration_completionHandler_')
+        assert hasattr(SC.SCContentFilter, 'initWithDesktopIndependentWindow_')
+        lines.append('Packaged ScreenCaptureKit window API: PASS')
         import database
         from episode import StructuredObservation
         from episode_engine import EpisodeEngine

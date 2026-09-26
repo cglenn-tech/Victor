@@ -87,6 +87,13 @@ def observe(consent_manager=None) -> Optional[Observation]:
         from window_identity import get_window_identity
         # get_metadata_context() uses only Quartz/AppKit — no AppleScript, no pixels
         ctx = ctx_module.get_metadata_context()
+        if ctx.app_name in _SYSTEM_APPS:
+            return None
+        import platform
+        if platform.system() == 'Darwin':
+            import permissions
+            if permissions.check() != 'GRANTED':
+                return _CONSENT_BLOCKED
         identity = get_window_identity(ctx, consent_manager.session_epoch)
         if identity is None or not consent_manager.is_authorized(identity):
             # Window is not authorized — return sentinel without capturing any pixels.

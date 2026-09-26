@@ -5,6 +5,7 @@ pyobjc-framework-Cocoa>=10.0
 pyobjc-framework-Security>=10.0
 pyobjc-framework-Vision
 pyobjc-framework-Quartz>=10.0
+pyobjc-framework-ScreenCaptureKit>=10.0
 python-dotenv
 certifi>=2026.7.22
 websockets

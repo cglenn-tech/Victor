@@ -160,13 +160,13 @@ class ObservationBatcher:
 
 # ── Batch analysis ────────────────────────────────────────────────────────────
 
-def _analyze_batch(items: list[BatchItem], strict_retry: bool = False) -> Optional[StructuredObservation]:
+def _analyze_batch(items: list[BatchItem], strict_retry: bool = False, job: Optional[str] = None) -> Optional[StructuredObservation]:
     """One model request for the whole batch. Returns None on any failure."""
     if not model_client.is_configured():
         return None
 
     try:
-        images = [_prepare_screenshot(i.screenshot_path) for i in items]
+        images = [] if job else [_prepare_screenshot(i.screenshot_path) for i in items]
     except Exception as e:
         # A screenshot that cannot be read/resized will fail every retry
         raise _PermanentBatchError(f"unreadable screenshot: {type(e).__name__}") from e
@@ -182,6 +182,7 @@ def _analyze_batch(items: list[BatchItem], strict_retry: bool = False) -> Option
     raw = model_client.chat_completion(
         messages=[{"role": "user", "content": content}],
         max_tokens=768,
+        job=job,
     )
     if not raw:
         return None
@@ -189,20 +190,20 @@ def _analyze_batch(items: list[BatchItem], strict_retry: bool = False) -> Option
     data = _parse_json(raw)
     if data is None:
         log.warning("vision.invalid_json", strict_retry=strict_retry)
-        if not strict_retry:
+        if not strict_retry and not job:
             return _analyze_batch(items, strict_retry=True)
         return None
 
     error = _validate(data, items)
     if error:
         log.warning("vision.schema_violation", error=error, strict_retry=strict_retry)
-        if not strict_retry:
+        if not strict_retry and not job:
             return _analyze_batch(items, strict_retry=True)
         return None
 
     if _is_shallow(data):
         log.warning("vision.shallow_output_rejected", strict_retry=strict_retry)
-        if not strict_retry:
+        if not strict_retry and not job:
             return _analyze_batch(items, strict_retry=True)
         return None
 

@@ -50,7 +50,7 @@ export function observationPayload(value: unknown) {
   const id = text(v.id, 36)
   if (!/^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(id)) throw new Error('Invalid observation ID')
   const start = date(v.start_time ?? v.observed_at), end = date(v.end_time ?? v.observed_at)
-  if (end < start) throw new Error('Invalid observation interval')
+  if (end < start || Date.parse(end) - Date.parse(start) > 86400000) throw new Error('Invalid observation interval')
   return {
     id, episode_id: text(v.episode_id, 100), title: text(v.title, 500),
     summary: text(v.summary, 10000), observed_at: start, start_time: start, end_time: end,

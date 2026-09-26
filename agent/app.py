@@ -357,6 +357,8 @@ class AppDelegate(AppKit.NSObject):
                 self._status_item.button().setTitle_("⬛")
                 labels = {
                     'connecting': 'Connecting…', 'error': 'Connection or analysis error',
+                    'analysis_pending': 'Processing screenshots…',
+                    'capture_blocked': 'Check Screen Recording permission',
                     'reconnect_required': 'Reconnect account', 'disconnected': 'Disconnected',
                 }
                 self._label_item.setTitle_("Victor: " + labels.get(state, 'Idle'))

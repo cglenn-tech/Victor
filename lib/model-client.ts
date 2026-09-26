@@ -22,7 +22,7 @@ export class ModelClientError extends Error {
   }
 }
 
-function readConfig(): { baseUrl: string; apiKey: string; model: string } {
+export function readConfig(): { baseUrl: string; apiKey: string; model: string } {
   const baseUrl = process.env.SELF_HOSTED_MODEL_URL
   const apiKey = process.env.SELF_HOSTED_API_KEY
   const model = process.env.SELF_HOSTED_MODEL_NAME

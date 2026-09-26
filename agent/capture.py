@@ -70,6 +70,11 @@ def _capture_window_macos(cg_window_id: int, output_path: Path) -> bool:
     try:
         import Quartz
 
+        # CGWindowListCreateImage is unavailable on newer macOS releases.
+        # ScreenCaptureKit preserves the same single-window boundary.
+        if int(platform.mac_ver()[0].split('.')[0] or '0') >= 14:
+            return _capture_window_sck(cg_window_id, output_path)
+
         image = Quartz.CGWindowListCreateImage(
             Quartz.CGRectNull,
             Quartz.kCGWindowListOptionIncludingWindow,
@@ -96,6 +101,51 @@ def _capture_window_macos(cg_window_id: int, output_path: Path) -> bool:
         return True
     except Exception:
         return False
+
+
+def _capture_window_sck(window_id: int, output_path: Path) -> bool:
+    import threading
+    import ScreenCaptureKit as SC
+    import Quartz
+    from Foundation import NSMutableData
+
+    done = threading.Event()
+    result = {}
+
+    def content_ready(content, error):
+        result['content'], result['error'] = content, error
+        done.set()
+
+    SC.SCShareableContent.getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler_(True, True, content_ready)
+    if not done.wait(5) or result.get('error') or not result.get('content'):
+        return False
+    window = next((w for w in result['content'].windows() if w.windowID() == window_id), None)
+    if window is None:
+        return False
+    content_filter = SC.SCContentFilter.alloc().initWithDesktopIndependentWindow_(window)
+    stream = SC.SCStreamConfiguration.alloc().init()
+    frame = window.frame()
+    stream.setWidth_(max(1, int(frame.size.width)))
+    stream.setHeight_(max(1, int(frame.size.height)))
+    stream.setShowsCursor_(False)
+    done.clear()
+
+    def image_ready(image, error):
+        # Encode inside the callback while the CGImage's lifetime is guaranteed.
+        if image is not None and error is None:
+            data = NSMutableData.data()
+            dest = Quartz.CGImageDestinationCreateWithData(data, 'public.png', 1, None)
+            if dest is not None:
+                Quartz.CGImageDestinationAddImage(dest, image, None)
+                if Quartz.CGImageDestinationFinalize(dest):
+                    result['png'] = bytes(data)
+        done.set()
+
+    SC.SCScreenshotManager.captureImageWithFilter_configuration_completionHandler_(content_filter, stream, image_ready)
+    if not done.wait(5) or not result.get('png'):
+        return False
+    output_path.write_bytes(result['png'])
+    return True
 
 
 def _capture_window_win32(hwnd: int, output_path: Path) -> bool:
