@@ -58,6 +58,9 @@ import vision
 from episode import Episode
 from episode_engine import EpisodeEngine
 from observer import _CONSENT_BLOCKED
+from bh_logging import get_logger
+
+log = get_logger('main')
 
 
 def _establish_session(owner, token, stop_event, state_callback=None) -> bool:
@@ -77,16 +80,19 @@ def _establish_session(owner, token, stop_event, state_callback=None) -> bool:
                     auth.store_user_id(server_owner)
                 if result.get('device_id'):
                     auth.store_device_id(result['device_id'])
+                log.info('session.connected', version=config.APP_VERSION)
                 return True
         except urllib.error.HTTPError as exc:
+            log.warning('session.http_error', status=exc.code)
             if exc.code in (401, 403):
                 if auth.read_credential() == token:
                     auth.delete_credential()
                 if state_callback:
                     state_callback('reconnect_required')
                 return False
-        except Exception:
-            pass
+        except Exception as exc:
+            reason = getattr(exc, 'reason', exc)
+            log.warning('session.connection_failed', error=type(reason).__name__)
         if state_callback:
             state_callback('connecting')
         stop_event.wait(5)

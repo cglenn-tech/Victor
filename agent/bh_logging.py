@@ -23,7 +23,9 @@ All log calls accept optional keyword arguments that are formatted as
 key=value pairs after the message.
 """
 import logging
+from logging.handlers import RotatingFileHandler
 import os
+from pathlib import Path
 import sys
 import time
 from typing import Any
@@ -99,6 +101,15 @@ def _build_handler() -> logging.Handler:
 _root = logging.getLogger("buildharvey")
 if not _root.handlers:
     _root.addHandler(_build_handler())
+    if sys.platform == 'darwin':
+        try:
+            log_dir = Path.home() / 'Library' / 'Logs' / 'Victor'
+            log_dir.mkdir(parents=True, exist_ok=True)
+            handler = RotatingFileHandler(log_dir / 'agent.log', maxBytes=512_000, backupCount=2)
+            handler.setFormatter(_SafeFormatter('%(asctime)s %(levelname)s [%(name)s] %(message)s'))
+            _root.addHandler(handler)
+        except OSError:
+            pass  # A read-only log directory must not prevent connection.
 _root.setLevel(_LOG_LEVEL)
 _root.propagate = False
 

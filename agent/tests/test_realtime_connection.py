@@ -6,8 +6,10 @@ Run separately from tests that replace config/auth modules globally.
 import asyncio
 from contextlib import suppress
 import json
+import os
 from pathlib import Path
 import sys
+import tempfile
 import time
 import types
 import unittest
@@ -15,14 +17,27 @@ from unittest.mock import patch
 
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedOK
+from tls_test_support import local_tls_server
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.modules['config'] = types.SimpleNamespace(BASE_URL='https://victor.invalid', APP_VERSION='1.1.1')
 sys.modules['auth'] = types.SimpleNamespace(read_credential=lambda: 'fictional-device-token')
 import realtime_client as rc
+from tls_config import configure_tls
 
 
 class RealtimeConnection(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        cert, self.server_tls = local_tls_server(directory.name)
+        environment = patch.dict(os.environ, {'SSL_CERT_DIR': directory.name, 'NO_PROXY': '127.0.0.1'})
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop('SSL_CERT_FILE', None)
+        with patch('tls_config.certifi.where', return_value=cert):
+            configure_tls()
+
     async def check_connection(self, rejected=False):
         received = []
         gateway_paths = []
@@ -60,9 +75,9 @@ class RealtimeConnection(unittest.IsolatedAsyncioTestCase):
         rc._current_state = 'idle'
         rc._last_session_check = 123
         rc._recording_event.set()
-        async with serve(server, '127.0.0.1', 0) as listener:
+        async with serve(server, '127.0.0.1', 0, ssl=self.server_tls) as listener:
             port = listener.sockets[0].getsockname()[1]
-            creds = {'supabase_url': f'http://127.0.0.1:{port}', 'anon_key': 'fictional-public-key',
+            creds = {'supabase_url': f'https://127.0.0.1:{port}', 'anon_key': 'fictional-public-key',
                      'access_token': 'fictional-user-jwt', 'device_id': 'device-1', 'expires_at': time.time()+900}
             with patch.object(rc, '_fetch_credentials', return_value=creds):
                 task = asyncio.create_task(rc._connect_once())
