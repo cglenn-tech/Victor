@@ -73,6 +73,7 @@ MODEL_MAX_RETRIES = 3              # retries on network/5xx/429 (exponential bac
 
 # ── Observation batching (screenshots → one structured observation) ──────────
 OBSERVATION_BATCH_SIZE = max(1, min(5, int(os.environ.get("OBSERVATION_BATCH_SIZE", "5"))))
+OBSERVATION_MAX_WAIT_SECONDS = 30
 OBSERVATION_FLUSH_IDLE_SECONDS = int(os.environ.get("OBSERVATION_FLUSH_IDLE_SECONDS", "600"))
 MIN_OBSERVATION_BATCH = 2          # below this, idle flushes drop the partial batch
 
@@ -86,7 +87,7 @@ BASE_URL = os.environ.get("BUILDHARVEY_BASE_URL", "https://buildharvey.com")
 try:
     from _version import __version__ as APP_VERSION
 except ImportError:
-    APP_VERSION = '1.1.2'
+    APP_VERSION = '1.1.3'
 
 # ── Privacy mode (master switch) ─────────────────────────────────────────────
 # PRIVATE_MODE=true is the production default. CI and development set it to
@@ -102,7 +103,7 @@ else:
     PRIVATE_MODE = os.environ.get("BUILDHARVEY_PRIVATE_MODE", "true").lower() == "true"
 
 # ── Privacy / Capture Lease Model (Phase 1) ───────────────────────────────────
-# Per-window consent before any observation is recorded.
+# Explicit work-session consent before any window is captured.
 # Default TRUE in Private Mode (production). Override with ENABLE_CAPTURE_LEASES=false
 # in development/CI.
 # PRODUCTION_BUILD: always True, cannot be weakened.

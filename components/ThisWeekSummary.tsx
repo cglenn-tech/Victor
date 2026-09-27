@@ -1,6 +1,6 @@
 'use client'
 
-import { activeMinutes } from '@/lib/work-time'
+import { minutesInPeriod, periodBounds } from '@/lib/work-time'
 import { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import type { Episode } from '@/lib/types'
@@ -80,24 +80,28 @@ function computeSummary(episodes: Episode[], period: Period, customStart: string
       break
   }
 
-  const filtered = episodes.filter((ep) => {
-    const d = localIsoDate(new Date(ep.started_at))
-    return d >= from && d <= to && ep.is_reportable !== false
-  })
+  let bounds
+  try { bounds = periodBounds(from, to, Intl.DateTimeFormat().resolvedOptions().timeZone) }
+  catch { return { matters: [], caseMinutes: 0, adminMinutes: 0, totalMinutes: 0 } }
+  const seen = new Set<string>()
 
   const projectMap: Record<string, { minutes: number; displayName: string }> = {}
   let adminMinutes = 0
 
-  for (const ep of filtered) {
+  for (const ep of episodes) {
+    if (seen.has(ep.id)) continue
+    seen.add(ep.id)
+    const minutes = minutesInPeriod(ep, bounds, now.getTime())
+    if (minutes <= 0) continue
     if (ep.work_type === 'administrative') {
-      adminMinutes += activeMinutes(ep)
+      adminMinutes += minutes
     } else {
       const k = (ep.case_name?.trim() || 'Unknown').toLowerCase().replace(/\s+/g, ' ')
       if (projectMap[k]) {
-        projectMap[k].minutes += activeMinutes(ep)
+        projectMap[k].minutes += minutes
       } else {
         projectMap[k] = {
-          minutes: activeMinutes(ep),
+          minutes,
           displayName: ep.case_name?.trim() || 'Unknown',
         }
       }
@@ -130,6 +134,8 @@ export default function ThisWeekSummary({ episodes: initEpisodes, onEpisodeUpdat
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const [showCustom, setShowCustom] = useState(false)
+  const [clock, setClock] = useState(0)
+  useEffect(() => { const timer = setInterval(() => setClock(c => c + 1), 60_000); return () => clearInterval(timer) }, [])
 
   // Sync when parent updates episodes (e.g. from manual entry or other realtime)
   useEffect(() => {
@@ -167,7 +173,7 @@ export default function ThisWeekSummary({ episodes: initEpisodes, onEpisodeUpdat
 
   const data = useMemo(
     () => computeSummary(episodes, period, customStart, customEnd),
-    [episodes, period, customStart, customEnd]
+    [episodes, period, customStart, customEnd, clock]
   )
 
   if (data.totalMinutes === 0 && period !== 'custom') {
@@ -220,6 +226,7 @@ export default function ThisWeekSummary({ episodes: initEpisodes, onEpisodeUpdat
       <p className="text-xs font-semibold uppercase tracking-widest text-neutral-400 mb-4">
         {periodLabel(period, customStart, customEnd)}
       </p>
+      <p className="text-xs text-neutral-400 mb-3">Based on when work was captured · {Intl.DateTimeFormat().resolvedOptions().timeZone}</p>
 
       {data.totalMinutes === 0 ? (
         <p className="text-sm text-neutral-400">No recorded time for this period.</p>

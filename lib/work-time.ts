@@ -5,6 +5,15 @@ export function activeMinutes(ep: Episode): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0
 }
 
+export function minutesInPeriod(ep: Episode, bounds: { start: string; end: string }, asOf = Infinity): number {
+  if (ep.is_reportable === false || ep.deleted_at) return 0
+  const start = Date.parse(ep.started_at), end = Date.parse(ep.ended_at)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0
+  const from = Math.max(start, Date.parse(bounds.start))
+  const to = Math.min(end, Date.parse(bounds.end), asOf)
+  return to > from ? activeMinutes(ep) * (to - from) / (end - start) : 0
+}
+
 export function localDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }

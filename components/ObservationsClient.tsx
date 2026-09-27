@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { localDate } from '@/lib/work-time'
+import DesktopAgentCard from './DesktopAgentCard'
 import type { Observation } from '@/lib/types'
 
 type DayGroup = {
@@ -237,7 +238,6 @@ function ObservationRow({
 
 export default function ObservationsClient({ observations }: { observations: Observation[] }) {
   const [items, setItems] = useState(observations)
-  const [seeding, setSeeding] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -257,24 +257,6 @@ export default function ObservationsClient({ observations }: { observations: Obs
 
   const groups = groupByDay(items)
 
-  async function seed() {
-    setSeeding(true)
-    setError(null)
-    try {
-      const res = await fetch('/api/observations/seed', { method: 'POST' })
-      const body = await res.json()
-      if (!res.ok) throw new Error(body.error ?? 'Seed failed')
-      if (body.seeded > 0) {
-        const list = await fetch('/api/observations')
-        setItems(await list.json())
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Seed failed')
-    } finally {
-      setSeeding(false)
-    }
-  }
-
   function update(id: string, patch: Partial<Observation>) {
     setItems((prev) =>
       prev.map((o) => (o.id === id ? { ...o, ...patch } : o)),
@@ -287,26 +269,24 @@ export default function ObservationsClient({ observations }: { observations: Obs
 
   if (items.length === 0) {
     return (
+      <div>
+        <DesktopAgentCard />
       <div className="text-center py-16">
         <p className="text-sm text-neutral-500 mb-4">No observations yet.</p>
-        <button
-          onClick={seed}
-          disabled={seeding}
-          className="text-sm bg-neutral-900 text-white rounded px-4 py-2 disabled:opacity-50"
-        >
-          {seeding ? 'Adding…' : 'Add demo data'}
-        </button>
+        <p className="text-xs text-neutral-400">Start a work session. Your screenshots are analyzed and observations appear here automatically, ready to edit.</p>
         {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
+      </div>
       </div>
     )
   }
 
   return (
     <div>
+      <DesktopAgentCard />
       {groups.map((g) => (
         <div key={g.date} className="mb-8">
           <p className="text-xs font-medium text-neutral-400 uppercase tracking-wide mb-3">
-            {g.label}
+            {g.label} · {g.date}
           </p>
           <div className="flex flex-col gap-3">
             {g.observations.map((o) => (

@@ -37,6 +37,7 @@ const MOCK_OBSERVATIONS = [
 ]
 
 export async function POST() {
+  if (process.env.NODE_ENV === 'production') return Response.json({ error: 'Demo records are disabled in real accounts' }, { status: 404 })
   const supabase = await getServerClient()
   const { data: { user } } = await supabase.auth.getUser()
 

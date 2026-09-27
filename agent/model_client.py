@@ -28,6 +28,13 @@ class ModelNotConfiguredError(RuntimeError):
     """Raised when the self-hosted endpoint is not configured via env."""
 
 
+class PendingAnalysis(Exception):
+    """An accepted job is still queued/running; poll it, never submit it again."""
+    def __init__(self, job: str):
+        self.job = job
+        super().__init__('Analysis is pending')
+
+
 _session = __import__('threading').local()
 
 
@@ -45,6 +52,7 @@ def chat_completion(
     messages: list[dict],
     max_tokens: int = 1024,
     temperature: float = 0.2,
+    job: Optional[str] = None,
 ) -> Optional[str]:
     """
     Send one chat completion request. Returns assistant text, or None on any
@@ -60,7 +68,7 @@ def chat_completion(
     if not token or token != auth.read_credential() or owner != auth.read_user_id():
         return None
     url = config.BASE_URL.rstrip("/") + "/api/agent/analyze"
-    payload = json.dumps({"messages": messages}).encode()
+    payload = json.dumps({"job": job} if job else {"messages": messages, "async": True}).encode()
 
     stop_event = getattr(_session, "stop_event", None)
     last_error = ""
@@ -88,6 +96,8 @@ def chat_completion(
         try:
             with urllib.request.urlopen(req, timeout=55) as resp:
                 result = json.loads(resp.read())
+            if result.get('pending') and isinstance(result.get('job'), str):
+                raise PendingAnalysis(result['job'])
             content = result["choices"][0]["message"]["content"]
             if isinstance(content, list):
                 content = "".join(part.get("text", "") for part in content)
@@ -96,6 +106,8 @@ def chat_completion(
                 log.warning("model_client.empty_content", attempt=attempt + 1)
                 continue
             return text
+        except PendingAnalysis:
+            raise
         except urllib.error.HTTPError as e:
             last_error = f"http_{e.code}"
             retryable = e.code == 429 or e.code >= 500

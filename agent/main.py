@@ -22,8 +22,8 @@ Session gate:
   - Active episode is finalized on Stop.
 
 Phase 1 (ENABLE_CAPTURE_LEASES=true):
-  - Per-window consent required before any observation is recorded.
-  - Unauthorized windows generate ObservationGaps.
+  - Explicit Start authorizes active-window capture for this work session.
+  - OS permission failures generate ObservationGaps and a visible status.
   - Security boundary crossings (lock/logout/restart) invalidate all leases.
 
 Startup:
@@ -55,6 +55,7 @@ import observer
 import realtime_client
 import sync
 import vision
+from analysis_queue import ObservationQueue
 from episode import Episode
 from episode_engine import EpisodeEngine
 from observer import _CONSENT_BLOCKED
@@ -122,22 +123,16 @@ def main(
         pass
     conn = database.connect(owner)
     engine = EpisodeEngine()
-    batcher = vision.ObservationBatcher()
+    batcher = ObservationQueue(conn)
     open_gap_id = None
     consent_manager = None
     state = 'idle'
     try:
-        crashed = database.check_dirty_shutdown(conn)
         database.mark_dirty_shutdown(conn)
         database.mark_invalid_episodes(conn)
         if config.ENABLE_CAPTURE_LEASES:
-            from consent_manager import ConsentManager
-            consent_manager = ConsentManager(conn)
-            if crashed:
-                consent_manager.invalidate_all('app_crashed')
-            invalidated = consent_manager.get_invalidated_leases()
-            if invalidated:
-                consent_manager.begin_batch_reconsent(invalidated)
+            from session_consent import SessionConsentManager
+            consent_manager = SessionConsentManager(conn)
         observer.reset()
         sync.start()  # persisted unsynced rows are the recovery queue
         realtime_client.set_status('idle')
@@ -147,13 +142,17 @@ def main(
             try:
                 if realtime_client.is_recording_active():
                     if state != 'recording':
+                        if consent_manager:
+                            consent_manager.begin_session()
                         realtime_client.set_status('recording')
                         state = 'recording'
                     open_gap_id = _cycle(conn, engine, batcher, consent_manager, open_gap_id)
                     if state_callback:
-                        state_callback('recording')
+                        state_callback(realtime_client.current_status())
                     stop_event.wait(config.CAPTURE_INTERVAL_SECONDS)
                 else:
+                    if consent_manager and consent_manager.active:
+                        consent_manager.end_session()
                     if state == 'recording' or len(batcher):
                         realtime_client.set_status('finalizing')
                         _flush_batcher(conn, engine, batcher)
@@ -165,9 +164,10 @@ def main(
                             open_gap_id = None
                         observer.reset()
                     state = 'idle'
-                    realtime_client.set_status('error' if batcher.last_error else 'idle')
+                    idle_status = batcher.idle_status
+                    realtime_client.set_status(idle_status)
                     if state_callback:
-                        state_callback('error' if batcher.last_error else 'idle')
+                        state_callback(idle_status)
                     stop_event.wait(1)
             except Exception:
                 traceback.print_exc()
@@ -179,6 +179,8 @@ def main(
     except KeyboardInterrupt:
         stop_event.set()
     finally:
+        if consent_manager:
+            consent_manager.end_session()
         # Shutdown never starts new model requests. Completed observations still
         # commit locally, even when the token was revoked while analysis ran.
         try:
@@ -197,7 +199,7 @@ def main(
 def _cycle(
     conn,
     engine: EpisodeEngine,
-    batcher: vision.ObservationBatcher,
+    batcher: ObservationQueue,
     consent_manager,
     open_gap_id: Optional[str],
 ) -> Optional[str]:
@@ -210,6 +212,13 @@ def _cycle(
 
     # ── Consent-blocked sentinel (Phase 1) ────────────────────────────────────
     if obs is _CONSENT_BLOCKED:
+        realtime_client.set_status('capture_blocked')
+        # Already submitted work must keep progressing even if the next window
+        # is unavailable or the OS permission was revoked.
+        so = batcher.maybe_idle_flush()
+        if so is not None:
+            _handle_observation(conn, engine, so)
+            batcher.acknowledge(so.id)
         # Window not authorized — open or extend an ObservationGap
         if open_gap_id is None:
             prev_ep_id = engine.active.id if engine.active else None
@@ -236,9 +245,11 @@ def _cycle(
         so = batcher.maybe_idle_flush()
         if so is not None:
             _handle_observation(conn, engine, so)
+            batcher.acknowledge(so.id)
         closed = engine.check_inactivity(now)
         if closed:
             _close_and_save(conn, closed)
+        realtime_client.set_status(batcher.status)
         return open_gap_id
 
     if obs.screenshot_path:
@@ -247,6 +258,7 @@ def _cycle(
         so = batcher.add(obs)
         if so is not None:
             _handle_observation(conn, engine, so)
+            batcher.acknowledge(so.id)
             realtime_client.set_status('recording')
         elif batcher.last_error:
             realtime_client.set_status('error')
@@ -258,17 +270,22 @@ def _cycle(
     so = batcher.maybe_idle_flush()
     if so is not None:
         _handle_observation(conn, engine, so)
+        batcher.acknowledge(so.id)
 
     # Also check inactivity in case of long metadata-only stretches
     closed = engine.check_inactivity(now)
     if closed:
         _close_and_save(conn, closed)
 
+    realtime_client.set_status(batcher.status)
+
     return open_gap_id
 
 
 def _handle_observation(conn, engine: EpisodeEngine, so) -> None:
     """Persist + sync a completed observation, then group it into an episode."""
+    if conn.execute('SELECT 1 FROM observations WHERE id = ?', (so.id,)).fetchone():
+        return  # crash recovery after saving but before acknowledging the job
     result = engine.ingest_observation(so)
     if result and result.closed_episode:
         _close_and_save(conn, result.closed_episode)
@@ -284,6 +301,7 @@ def _flush_batcher(conn, engine: EpisodeEngine, batcher) -> None:
         so = batcher.flush(force=True)
         if so is not None:
             _handle_observation(conn, engine, so)
+            batcher.acknowledge(so.id)
     except Exception:
         traceback.print_exc()
 

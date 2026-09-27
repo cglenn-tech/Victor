@@ -81,7 +81,7 @@ export default function HomepageClient({ episodes: init }: Props) {
         onEpisodeUpdate={handleEpisodeUpdate}
       />
       <div className="mb-10">
-        <ReportGenerator />
+        <ReportGenerator key={episodes.map(ep => `${ep.id}:${ep.edited_at}:${ep.is_reportable}`).join('|')} />
       </div>
       <ManualEntryForm onEpisodeSaved={handleEpisodeSaved} />
       <EpisodeList

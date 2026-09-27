@@ -284,7 +284,9 @@ class ConnectedFlow(unittest.TestCase):
         ep.pause_timing(at=self.now-900)
         ep.add_structured_observation(observation('Alpha', self.now-600, self.now-300))
         ep.close(at=iso(self.now-300))
-        self.assertEqual(ep.active_seconds, 600)
+        # Only the five-minute captured interval is supported; no pre-evidence
+        # idle time or later model processing is counted as work.
+        self.assertEqual(ep.active_seconds, 300)
 
     def test_windows_exit_waits_for_worker_to_finish_saving(self):
         import app_windows

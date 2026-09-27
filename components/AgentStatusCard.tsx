@@ -18,6 +18,8 @@ type CardState =
   | 'sync_pending'    // agent finished recording, syncing episode
   | 'update_required' // agent version below minimum required
   | 'error'           // unexpected failure
+  | 'analysis_pending'
+  | 'capture_blocked'
 
 const STATE_LABELS: Record<CardState, string> = {
   connecting:      'Connecting to desktop app…',
@@ -28,9 +30,11 @@ const STATE_LABELS: Record<CardState, string> = {
   recording:       'Recording',
   stopping:        'Stopping',
   finalizing:      'Finalizing',
-  sync_pending:    'Sync pending',
+  sync_pending:    'Saving observations to your account…',
   update_required: 'Update required',
   error:           'The desktop app reported a capture or analysis error',
+  analysis_pending: 'Processing screenshots — observations will appear automatically',
+  capture_blocked: 'Capture unavailable — check Screen Recording permission and open a work window',
 }
 
 const DOT_COLORS: Record<CardState, string> = {
@@ -45,6 +49,8 @@ const DOT_COLORS: Record<CardState, string> = {
   sync_pending:    'bg-yellow-400',
   update_required: 'bg-yellow-400',
   error:           'bg-red-400',
+  analysis_pending: 'bg-yellow-400',
+  capture_blocked: 'bg-yellow-400',
 }
 
 type BuildHarveyPresence = {
@@ -136,6 +142,11 @@ export default function AgentStatusCard({ device, onDailyReview }: Props) {
     channel.on('broadcast', { event: 'status' }, ({ payload }) => {
       if (cancelled || !versionAllowed.current) return
       const agentState: string = payload?.state ?? ''
+      if (agentState === 'analysis_pending' || agentState === 'capture_blocked') {
+        clearConnectingTimeout()
+        setState(agentState)
+        return
+      }
       if (agentState === 'connecting') {
         setState('connecting')
       } else if (agentState === 'recording') {
@@ -310,6 +321,7 @@ export default function AgentStatusCard({ device, onDailyReview }: Props) {
           <p className="text-sm font-medium text-neutral-700">{label}</p>
         </div>
         {error && <p role="alert" className="text-sm text-red-600 mb-3">{error}</p>}
+        <p className="text-xs text-neutral-500 mb-3">Start lets Victor capture your active work window and send screenshots to your Runpod service for analysis until you stop. You can edit every observation.</p>
         <button
           onClick={sendStart}
           className="text-sm font-medium bg-neutral-900 text-white px-4 py-1.5 rounded

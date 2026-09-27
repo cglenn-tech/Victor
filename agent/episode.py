@@ -188,6 +188,19 @@ class Episode:
         Elapsed wall-clock seconds minus any time spent paused.
         Always >= 0.
         """
+        if self._structured_observations:
+            # Count only captured intervals. Queue time, upload time and time
+            # between unrelated screenshot batches are not evidence of work.
+            intervals = sorted((o.start_time, o.end_time) for o in self._structured_observations)
+            merged = []
+            for start, end in intervals:
+                if merged and start <= merged[-1][1]:
+                    merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+                else:
+                    merged.append((start, end))
+            return sum(max(0, calendar.timegm(time.strptime(end, '%Y-%m-%dT%H:%M:%SZ')) -
+                               calendar.timegm(time.strptime(start, '%Y-%m-%dT%H:%M:%SZ')))
+                       for start, end in merged)
         try:
             start = calendar.timegm(time.strptime(self.started_at, "%Y-%m-%dT%H:%M:%SZ"))
             end = (
@@ -225,7 +238,11 @@ class Episode:
 
     def add_structured_observation(self, so: StructuredObservation) -> None:
         """Attach a completed model observation to this episode."""
+        if any(o.id == so.id for o in self._structured_observations):
+            return
         self._structured_observations.append(so)
+        self.started_at = min(o.start_time for o in self._structured_observations)
+        self.ended_at = max(o.end_time for o in self._structured_observations)
         self.resume_timing(calendar.timegm(time.strptime(so.start_time, "%Y-%m-%dT%H:%M:%SZ")))
         self.last_user_activity_at = calendar.timegm(time.strptime(so.end_time, "%Y-%m-%dT%H:%M:%SZ"))
         self.last_meaningful_evidence_at = time.time()
@@ -252,7 +269,7 @@ class Episode:
         self.add_raw_observation(obs)
 
     def close(self, at: Optional[str] = None) -> None:
-        self.ended_at = at or _iso_now()
+        self.ended_at = max(o.end_time for o in self._structured_observations) if self._structured_observations else (at or _iso_now())
         if self._is_paused:
             self.resume_timing(calendar.timegm(time.strptime(self.ended_at, "%Y-%m-%dT%H:%M:%SZ")))
 

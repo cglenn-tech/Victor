@@ -4,6 +4,7 @@ import { getServerClient } from '@/lib/supabase-server'
 import type { Episode, Observation } from '@/lib/types'
 import { buildReport, reviewedEpisodes } from '@/lib/report'
 import { periodBounds } from '@/lib/work-time'
+import { reportIsCurrent } from '@/lib/report-validity'
 
 export async function GET(request: NextRequest) {
   const supabase = await getServerClient();
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
 
   const base = supabase
     .from("weekly_reports")
-    .select("id, content, period_label, summary_json, created_at")
+    .select("id, content, period_label, summary_json, created_at, source_episode_ids")
     .eq("user_id", user.id);
 
   const { data } = id
@@ -35,6 +36,7 @@ export async function GET(request: NextRequest) {
         .limit(1)
         .single();
 
+  if (data && !await reportIsCurrent(user.id, data)) return Response.json({ content: null, invalidated: true });
   return Response.json(data ?? { content: null });
 }
 
