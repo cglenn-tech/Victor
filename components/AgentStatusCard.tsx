@@ -30,7 +30,7 @@ const STATE_LABELS: Record<CardState, string> = {
   recording:       'Recording',
   stopping:        'Stopping',
   finalizing:      'Finalizing',
-  sync_pending:    'Sync pending',
+  sync_pending:    'Saving observations to your account…',
   update_required: 'Update required',
   error:           'The desktop app reported a capture or analysis error',
   analysis_pending: 'Processing screenshots — observations will appear automatically',

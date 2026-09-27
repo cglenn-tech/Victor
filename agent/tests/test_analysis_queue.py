@@ -56,6 +56,11 @@ class AnalysisQueueTest(unittest.TestCase):
         self.assertEqual(len(database.get_unsynced_episodes(self.conn)), 1)
         restored.acknowledge(result.id)
         self.assertEqual(len(ObservationQueue(self.conn)), 0)
+        self.assertEqual(restored.idle_status, 'sync_pending')
+        self.conn.execute('UPDATE observations SET synced_at = ?', (self.so.start_time,))
+        self.conn.execute('UPDATE episodes SET synced_at = ?', (self.so.start_time,))
+        self.conn.commit()
+        self.assertEqual(restored.idle_status, 'idle')
 
     def test_one_screenshot_is_submitted_within_thirty_seconds_and_queue_is_owner_scoped(self):
         q = ObservationQueue(self.conn)

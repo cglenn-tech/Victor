@@ -164,7 +164,7 @@ def main(
                             open_gap_id = None
                         observer.reset()
                     state = 'idle'
-                    idle_status = 'error' if batcher.last_error else ('analysis_pending' if len(batcher) else 'idle')
+                    idle_status = batcher.idle_status
                     realtime_client.set_status(idle_status)
                     if state_callback:
                         state_callback(idle_status)

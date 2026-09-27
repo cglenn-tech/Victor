@@ -36,7 +36,24 @@ class ObservationQueue:
 
     @property
     def status(self):
-        return 'error' if self.last_error else ('analysis_pending' if self._jobs else 'recording')
+        if self.last_error:
+            return 'error'
+        if self._jobs:
+            return 'analysis_pending'
+        return 'sync_pending' if self.has_pending_sync else 'recording'
+
+    @property
+    def has_pending_sync(self):
+        return bool(self.conn.execute('SELECT 1 FROM observations WHERE synced_at IS NULL '
+                    'UNION ALL SELECT 1 FROM episodes WHERE synced_at IS NULL LIMIT 1').fetchone())
+
+    @property
+    def idle_status(self):
+        if self.last_error:
+            return 'error'
+        if len(self):
+            return 'analysis_pending'
+        return 'sync_pending' if self.has_pending_sync else 'idle'
 
     def checkpoint(self):
         value = json.dumps({'items': self._items, 'jobs': self._jobs, 'first_add': self._first_add})
