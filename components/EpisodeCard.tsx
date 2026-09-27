@@ -138,6 +138,11 @@ export default function EpisodeCard({
       {episode.work_type === "administrative" && (
         <span className="ml-1 text-neutral-300">&middot; Admin</span>
       )}
+      {episode.is_reportable === false && (
+        <span className="block mt-1 font-medium text-neutral-500">
+          Excluded from totals and reports
+        </span>
+      )}
     </p>
   );
 
